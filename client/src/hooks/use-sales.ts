@@ -20,12 +20,21 @@ export function useSales(params?: { date?: string; limit?: string }) {
 export function useCreateSale() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: InsertSale) => {
-      const validated = api.sales.create.input.parse(data);
+    mutationFn: async (data: any) => {
+      // Ensure date is ISO string if it's a Date object
+      const payload = {
+        ...data,
+        date: data.date instanceof Date ? data.date.toISOString() : data.date,
+        itemId: Number(data.itemId),
+        quantity: Number(data.quantity),
+        unitPrice: Number(data.unitPrice),
+        total: Number(data.total),
+      };
+      
       const res = await fetch(api.sales.create.path, {
         method: api.sales.create.method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(validated),
+        body: JSON.stringify(payload),
         credentials: "include",
       });
       

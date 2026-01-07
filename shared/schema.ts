@@ -57,8 +57,12 @@ export const stockRelations = relations(stock, ({ one }) => ({
 
 // Schemas
 export const insertItemSchema = createInsertSchema(items).omit({ id: true, createdAt: true });
-export const insertSaleSchema = createInsertSchema(sales).omit({ id: true, createdAt: true });
-export const insertStockSchema = createInsertSchema(stock).omit({ id: true, createdAt: true });
+export const insertSaleSchema = createInsertSchema(sales, {
+  date: z.coerce.date(),
+}).omit({ id: true, createdAt: true });
+export const insertStockSchema = createInsertSchema(stock, {
+  date: z.coerce.date(),
+}).omit({ id: true, createdAt: true });
 
 // Types
 export type Item = typeof items.$inferSelect;

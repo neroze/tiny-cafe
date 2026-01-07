@@ -60,15 +60,34 @@ export async function registerRoutes(
 
   app.post(api.sales.create.path, async (req, res) => {
     try {
-      // Coerce numeric values from strings if they come from forms
+      // Robust date and number parsing
+      const rawData = { ...req.body };
+      
+      // Coerce numeric values
+      const itemId = Number(rawData.itemId);
+      const quantity = Number(rawData.quantity);
+      const unitPrice = Number(rawData.unitPrice);
+      const total = Number(rawData.total);
+      
+      // Handle date properly - check if it's already a date object or string
+      let date: Date;
+      if (rawData.date) {
+        date = new Date(rawData.date);
+        // Fallback to now if invalid date
+        if (isNaN(date.getTime())) date = new Date();
+      } else {
+        date = new Date();
+      }
+
       const input = api.sales.create.input.parse({
-        ...req.body,
-        itemId: Number(req.body.itemId),
-        quantity: Number(req.body.quantity),
-        unitPrice: Number(req.body.unitPrice),
-        total: Number(req.body.total),
-        date: req.body.date ? new Date(req.body.date) : new Date(),
+        ...rawData,
+        itemId,
+        quantity,
+        unitPrice,
+        total,
+        date
       });
+      
       const sale = await storage.createSale(input);
       res.status(201).json(sale);
     } catch (err) {
