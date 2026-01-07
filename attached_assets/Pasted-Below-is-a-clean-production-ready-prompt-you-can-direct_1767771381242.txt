@@ -1,0 +1,218 @@
+Below is a **clean, production-ready prompt** you can directly paste into **GitHub Copilot / Bolt / Cursor / AI code generator** to build your **React + Tailwind + MongoDB Café Stock & Sales App**.
+
+---
+
+## 📌 SYSTEM PROMPT — Café Stock & Sales Management App
+
+**Role:**
+Act as a senior full-stack engineer and product architect.
+
+**Objective:**
+Build a **lightweight web application** to manage **daily sales, stock, and revenue targets** for a small café.
+Primary business goal is to **track and achieve NPR 200,000 revenue per quarter**.
+
+---
+
+## 🧱 Tech Stack (Mandatory)
+
+### Frontend
+
+* React (Vite or Next.js App Router)
+* Tailwind CSS
+* React Query or RTK Query
+* Chart.js or Recharts
+
+### Backend
+
+* Node.js + Express
+* MongoDB (Mongoose)
+* REST APIs (clean separation)
+
+### Optional
+
+* JWT authentication (single admin user)
+* Deployed-ready structure
+
+---
+
+## 🧩 Core Features
+
+### 1️⃣ Dashboard (Landing Page)
+
+Display:
+
+* Today’s sales (NPR)
+* This week vs weekly target (15,500)
+* This month vs monthly target (66,700)
+* Quarter progress vs 200,000 target
+* Gross profit (estimated)
+* Top 5 selling items
+
+Visuals:
+
+* Progress bars for targets
+* Simple line chart for daily sales
+* Bar chart for top items
+
+---
+
+### 2️⃣ Sales Management
+
+**Functions:**
+
+* Add daily sales entries:
+
+  * Date
+  * Item
+  * Quantity
+  * Unit price
+* Auto-calculate:
+
+  * Total per item
+  * Daily total revenue
+
+**Rules:**
+
+* No empty entries
+* Date defaults to today
+* Editable same day only
+
+---
+
+### 3️⃣ Stock Management
+
+**Per item:**
+
+* Item name
+* Opening stock
+* Purchased quantity
+* Sold quantity (auto from sales)
+* Wastage
+* Closing stock (calculated)
+* Cost price
+* Selling price
+* Margin %
+
+**Alerts:**
+
+* Low stock warning
+* High wastage warning
+* Low margin (<40%) highlight
+
+---
+
+### 4️⃣ Menu / Item Management
+
+* Add / edit / deactivate menu items
+* Category (Snacks, Drinks, Main)
+* Flag high-margin items
+* Prevent deleting items with sales history
+
+---
+
+### 5️⃣ Reports
+
+* Daily sales report
+* Weekly summary
+* Monthly cumulative report
+* Export to CSV
+
+---
+
+## 🗂️ Data Models (MongoDB)
+
+### Item
+
+```js
+{
+  name: String,
+  category: String,
+  costPrice: Number,
+  sellingPrice: Number,
+  minStock: Number,
+  isActive: Boolean
+}
+```
+
+### Sale
+
+```js
+{
+  date: Date,
+  itemId: ObjectId,
+  quantity: Number,
+  unitPrice: Number,
+  total: Number
+}
+```
+
+### Stock
+
+```js
+{
+  itemId: ObjectId,
+  openingStock: Number,
+  purchased: Number,
+  sold: Number,
+  wastage: Number,
+  closingStock: Number,
+  date: Date
+}
+```
+
+---
+
+## 🧠 Business Logic Rules (Important)
+
+* Closing stock = opening + purchased − sold − wastage
+* Margin % = (selling − cost) / selling
+* Quarterly progress auto-calculated
+* 70% revenue concentration check (top items)
+* Wastage must always be recorded separately
+
+---
+
+## 🎨 UI / UX Requirements
+
+* Clean café-style UI
+* Mobile-friendly
+* Large numbers for sales
+* Minimal clicks (fast data entry)
+* Dark mode optional
+
+---
+
+## 🔐 Security
+
+* Single admin login
+* Input validation
+* No client-side calculations trusted
+
+---
+
+## 📦 Deliverables
+
+* Frontend React app
+* Backend API
+* MongoDB schemas
+* Seed data for sample café menu
+* README with setup instructions
+
+---
+
+## 🏁 Success Criteria
+
+* App clearly shows whether café is **on track or off track** to hit NPR 200,000 per quarter
+* Owner can operate app in **<10 minutes per day**
+* No dependency on Excel
+
+---
+
+If you want, next I can:
+
+* Break this into **frontend vs backend prompts**
+* Generate **Mongo seed data for Nepali café**
+* Generate **API routes only**
+* Simplify this prompt specifically for **Bolt.new**
+
+Just tell me.

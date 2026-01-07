@@ -1,0 +1,140 @@
+Below is a **short, Bolt.new–optimized prompt**.
+This is **intentionally concise and directive**, so Bolt generates clean code without overthinking.
+
+You can **paste this directly into Bolt.new**.
+
+---
+
+## ⚡ Bolt.new Prompt — Café Stock & Sales App
+
+**Role:**
+Build a simple full-stack café management app.
+
+**Goal:**
+Track **daily sales, stock, and revenue targets** to reach **NPR 200,000 per quarter**.
+
+---
+
+## Tech Stack
+
+* Frontend: **React + Tailwind**
+* Backend: **Node.js + Express**
+* Database: **MongoDB (Mongoose)**
+* API: REST
+
+---
+
+## Pages / Features
+
+### 1. Dashboard
+
+Show:
+
+* Today’s sales
+* Weekly sales vs target (15,500)
+* Monthly sales vs target (66,700)
+* Quarterly progress vs target (200,000)
+* Top 5 selling items
+
+Use progress bars and simple charts.
+
+---
+
+### 2. Sales Management
+
+Form to add sales:
+
+* Date (default today)
+* Item
+* Quantity
+* Unit price
+* Auto-calculate total
+
+List daily sales.
+
+---
+
+### 3. Stock Management
+
+For each item:
+
+* Opening stock
+* Purchased
+* Sold (auto from sales)
+* Wastage
+* Closing stock (calculated)
+* Cost price
+* Selling price
+* Margin %
+
+Highlight:
+
+* Low stock
+* Margin below 40%
+
+---
+
+### 4. Menu Items
+
+* Add / edit items
+* Category (snack, drink, main)
+* Activate / deactivate items
+
+---
+
+## MongoDB Models
+
+**Item**
+
+```js
+name, category, costPrice, sellingPrice, minStock, isActive
+```
+
+**Sale**
+
+```js
+date, itemId, quantity, unitPrice, total
+```
+
+**Stock**
+
+```js
+itemId, openingStock, purchased, sold, wastage, closingStock, date
+```
+
+---
+
+## Business Rules
+
+* Closing stock = opening + purchased − sold − wastage
+* Margin % = (selling − cost) / selling
+* Quarterly total auto-calculated from sales
+
+---
+
+## UI Requirements
+
+* Clean, mobile-friendly
+* Fast data entry
+* Minimal clicks
+* Tailwind styling
+
+---
+
+## Deliverables
+
+* React frontend
+* Express API
+* MongoDB schemas
+* Sample seed data
+* README
+
+---
+
+If you want next, I can:
+
+* Reduce this further to **one-screen MVP**
+* Add **auth**
+* Convert this to **Next.js App Router**
+
+Just say the word.
