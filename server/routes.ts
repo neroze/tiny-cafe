@@ -60,17 +60,25 @@ export async function registerRoutes(
 
   app.post(api.sales.create.path, async (req, res) => {
     try {
-      // Coerce integers
+      // Coerce numeric values from strings if they come from forms
       const input = api.sales.create.input.parse({
         ...req.body,
+        itemId: Number(req.body.itemId),
+        quantity: Number(req.body.quantity),
+        unitPrice: Number(req.body.unitPrice),
+        total: Number(req.body.total),
         date: req.body.date ? new Date(req.body.date) : new Date(),
       });
       const sale = await storage.createSale(input);
       res.status(201).json(sale);
     } catch (err) {
-      console.error(err);
-      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
-      throw err;
+      console.error("Sale creation error:", err);
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ 
+          message: "Validation error: " + err.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ') 
+        });
+      }
+      res.status(500).json({ message: "Internal server error" });
     }
   });
 
@@ -83,7 +91,11 @@ export async function registerRoutes(
 
   app.post(api.stock.transaction.path, async (req, res) => {
     try {
-      const input = api.stock.transaction.input.parse(req.body);
+      const input = api.stock.transaction.input.parse({
+        ...req.body,
+        itemId: Number(req.body.itemId),
+        quantity: Number(req.body.quantity),
+      });
       const stock = await storage.recordStockTransaction(input);
       res.json(stock);
     } catch (err) {
