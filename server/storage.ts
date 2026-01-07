@@ -20,12 +20,13 @@ export interface IStorage {
   // Sales
   getSales(date?: Date, limit?: number): Promise<(Sale & { item: Item })[]>;
   createSale(sale: InsertSale): Promise<Sale>;
-  getDashboardStats(): Promise<{
+  getDashboardStats(range?: 'weekly' | 'monthly' | 'quarterly'): Promise<{
     dailySales: number;
     weeklySales: number;
     monthlySales: number;
     quarterlySales: number;
     topItems: { name: string; quantity: number; total: number }[];
+    itemSalesTrend: { date: string; items: Record<string, number> }[];
   }>;
 
   // Stock
@@ -54,10 +55,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteItem(id: number): Promise<void> {
-    // Soft delete usually better, but for MVP hard delete or just set active false
-    // Prompt says "Prevent deleting items with sales history" - implemented in route logic or here?
-    // Let's just set isActive to false if we want, or real delete. 
-    // For now, simpler to delete, but check constraints.
     await db.delete(items).where(eq(items.id, id));
   }
 
@@ -86,15 +83,11 @@ export class DatabaseStorage implements IStorage {
 
   async createSale(insertSale: InsertSale): Promise<Sale> {
     const [sale] = await db.insert(sales).values(insertSale).returning();
-    
-    // Auto-update stock for the day
     await this.updateDailyStockSales(sale.itemId, sale.date, sale.quantity);
-    
     return sale;
   }
 
   private async updateDailyStockSales(itemId: number, date: Date, quantity: number) {
-    // Find or create stock record for this day
     const dayStart = startOfDay(date);
     const dayEnd = endOfDay(date);
     
@@ -111,16 +104,14 @@ export class DatabaseStorage implements IStorage {
         })
         .where(eq(stock.id, current.id));
     } else {
-      // Get yesterday's closing to use as opening, or just 0
-      // For MVP, create new record
       await db.insert(stock).values({
         itemId,
         date: date,
-        openingStock: 0, // Should ideally fetch previous day's closing
+        openingStock: 0,
         purchased: 0,
         sold: quantity,
         wastage: 0,
-        closingStock: 0 - quantity // Negative if no opening
+        closingStock: 0 - quantity
       });
     }
   }
@@ -156,7 +147,6 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(stock.itemId, data.itemId), gte(stock.date, start), lte(stock.date, end)));
 
     if (!record) {
-      // Create new
       [record] = await db.insert(stock).values({
         itemId: data.itemId,
         date: date,
@@ -177,7 +167,6 @@ export class DatabaseStorage implements IStorage {
       updates.openingStock = data.quantity;
     }
 
-    // Recalculate closing
     const current = { ...record, ...updates };
     updates.closingStock = (current.openingStock || 0) + (current.purchased || 0) - (current.sold || 0) - (current.wastage || 0);
 
@@ -189,10 +178,22 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async getDashboardStats() {
+  async getDashboardStats(range: 'weekly' | 'monthly' | 'quarterly' = 'weekly') {
     const now = new Date();
+    let startDate: Date;
     
-    // Helper to sum sales
+    switch (range) {
+      case 'monthly':
+        startDate = startOfMonth(now);
+        break;
+      case 'quarterly':
+        startDate = startOfQuarter(now);
+        break;
+      case 'weekly':
+      default:
+        startDate = startOfWeek(now);
+    }
+    
     const getSum = async (start: Date, end: Date) => {
       const result = await db.select({ total: sum(sales.total) })
         .from(sales)
@@ -205,7 +206,6 @@ export class DatabaseStorage implements IStorage {
     const monthlySales = await getSum(startOfMonth(now), endOfMonth(now));
     const quarterlySales = await getSum(startOfQuarter(now), endOfQuarter(now));
 
-    // Top 5 items (all time or monthly? Let's do monthly)
     const topItemsRes = await db.select({
       name: items.name,
       quantity: sum(sales.quantity),
@@ -213,7 +213,7 @@ export class DatabaseStorage implements IStorage {
     })
     .from(sales)
     .innerJoin(items, eq(sales.itemId, items.id))
-    .where(gte(sales.date, startOfMonth(now)))
+    .where(gte(sales.date, startDate))
     .groupBy(items.name)
     .orderBy(desc(sum(sales.total)))
     .limit(5);
@@ -224,12 +224,38 @@ export class DatabaseStorage implements IStorage {
       total: Number(i.total)
     }));
 
+    const salesTrendRes = await db.select({
+      date: sql<string>`DATE(${sales.date})`,
+      itemName: items.name,
+      total: sum(sales.total)
+    })
+    .from(sales)
+    .innerJoin(items, eq(sales.itemId, items.id))
+    .where(gte(sales.date, startDate))
+    .groupBy(sql`DATE(${sales.date})`, items.name)
+    .orderBy(sql`DATE(${sales.date})`);
+
+    const trendMap = new Map<string, Record<string, number>>();
+    salesTrendRes.forEach(row => {
+      const dateStr = row.date;
+      if (!trendMap.has(dateStr)) {
+        trendMap.set(dateStr, {});
+      }
+      trendMap.get(dateStr)![row.itemName] = Number(row.total);
+    });
+
+    const itemSalesTrend = Array.from(trendMap.entries()).map(([date, items]) => ({
+      date,
+      items
+    }));
+
     return {
       dailySales,
       weeklySales,
       monthlySales,
       quarterlySales,
-      topItems
+      topItems,
+      itemSalesTrend
     };
   }
 }

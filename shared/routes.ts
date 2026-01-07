@@ -110,6 +110,9 @@ export const api = {
     stats: {
       method: 'GET' as const,
       path: '/api/dashboard',
+      input: z.object({
+        range: z.enum(['weekly', 'monthly', 'quarterly']).optional(),
+      }).optional(),
       responses: {
         200: z.object({
           dailySales: z.number(),
@@ -120,6 +123,10 @@ export const api = {
             name: z.string(),
             quantity: z.number(),
             total: z.number(),
+          })),
+          itemSalesTrend: z.array(z.object({
+            date: z.string(),
+            items: z.record(z.string(), z.number()),
           })),
         }),
       },
