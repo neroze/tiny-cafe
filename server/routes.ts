@@ -160,6 +160,31 @@ export async function registerRoutes(
     }
   });
 
+  app.get(api.dashboard.get_targets.path, async (req, res) => {
+    const weekly = await storage.getSetting('target_weekly');
+    const monthly = await storage.getSetting('target_monthly');
+    const quarterly = await storage.getSetting('target_quarterly');
+    
+    res.json({
+      weekly: Number(weekly) || 1550000,
+      monthly: Number(monthly) || 6670000,
+      quarterly: Number(quarterly) || 20000000,
+    });
+  });
+
+  app.post(api.dashboard.update_targets.path, async (req, res) => {
+    try {
+      const input = api.dashboard.update_targets.input.parse(req.body);
+      await storage.setSetting('target_weekly', input.weekly.toString());
+      await storage.setSetting('target_monthly', input.monthly.toString());
+      await storage.setSetting('target_quarterly', input.quarterly.toString());
+      res.json({ message: "Targets updated successfully" });
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      res.status(500).json({ message: "Failed to update targets" });
+    }
+  });
+
   await seedDatabase();
 
   return httpServer;

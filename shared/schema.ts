@@ -48,14 +48,16 @@ export const salesRelations = relations(sales, ({ one }) => ({
   }),
 }));
 
-export const stockRelations = relations(stock, ({ one }) => ({
-  item: one(items, {
-    fields: [stock.itemId],
-    references: [items.id],
-  }),
-}));
+export const settings = pgTable("settings", {
+  id: serial("id").primaryKey(),
+  key: text("key").unique().notNull(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
 
-// Schemas
+export const insertSettingsSchema = createInsertSchema(settings).omit({ id: true, updatedAt: true });
+export type Setting = typeof settings.$inferSelect;
+export type InsertSetting = z.infer<typeof insertSettingsSchema>;
 export const insertItemSchema = createInsertSchema(items).omit({ id: true, createdAt: true });
 export const insertSaleSchema = createInsertSchema(sales, {
   date: z.coerce.date(),

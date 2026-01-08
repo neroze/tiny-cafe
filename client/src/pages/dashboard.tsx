@@ -2,7 +2,7 @@ import * as React from "react";
 import { useDashboardStats } from "@/hooks/use-dashboard";
 import { Layout } from "@/components/layout";
 import { StatsCard } from "@/components/stats-card";
-import { DollarSign, Calendar as CalendarIcon, TrendingUp, Award, ArrowUpRight, Download } from "lucide-react";
+import { DollarSign, Calendar as CalendarIcon, TrendingUp, Award, ArrowUpRight, Download, Settings as SettingsIcon } from "lucide-react";
 import { Card } from "@/components/ui-components";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend, CartesianGrid } from "recharts";
 import { motion } from "framer-motion";
@@ -13,14 +13,57 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { api } from "@shared/routes";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Dashboard() {
+  const { toast } = useToast();
   const [range, setRange] = React.useState<'weekly' | 'monthly' | 'quarterly'>('weekly');
   const [dateRange, setDateRange] = React.useState<{ from: Date; to: Date }>({
     from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
     to: new Date()
   });
   const { data: stats, isLoading } = useDashboardStats(range);
+
+  const { data: targets } = useQuery({
+    queryKey: [api.dashboard.get_targets.path],
+  });
+
+  const updateTargetsMutation = useMutation({
+    mutationFn: async (newTargets: { weekly: number, monthly: number, quarterly: number }) => {
+      await apiRequest("POST", api.dashboard.update_targets.path, newTargets);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.dashboard.get_targets.path] });
+      toast({ title: "Targets updated", description: "Revenue targets have been saved." });
+    }
+  });
+
+  const [editTargets, setEditTargets] = React.useState({ weekly: 0, monthly: 0, quarterly: 0 });
+  const [isDialogOpen, setIsDialogOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (targets) {
+      setEditTargets({
+        weekly: targets.weekly / 100,
+        monthly: targets.monthly / 100,
+        quarterly: targets.quarterly / 100,
+      });
+    }
+  }, [targets]);
+
+  const handleUpdateTargets = () => {
+    updateTargetsMutation.mutate({
+      weekly: Math.round(editTargets.weekly * 100),
+      monthly: Math.round(editTargets.monthly * 100),
+      quarterly: Math.round(editTargets.quarterly * 100),
+    });
+    setIsDialogOpen(false);
+  };
 
   if (isLoading) {
     return (
@@ -114,6 +157,55 @@ export default function Dashboard() {
           <Button onClick={handleExport} className="gap-2">
             <Download className="w-4 h-4" /> Export CSV
           </Button>
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="icon">
+                <SettingsIcon className="w-4 h-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Configure Revenue Targets</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="weekly" className="text-right text-sm">Weekly (NPR)</Label>
+                  <Input
+                    id="weekly"
+                    type="number"
+                    value={editTargets.weekly}
+                    onChange={(e) => setEditTargets({ ...editTargets, weekly: Number(e.target.value) })}
+                    className="col-span-3"
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="monthly" className="text-right text-sm">Monthly (NPR)</Label>
+                  <Input
+                    id="monthly"
+                    type="number"
+                    value={editTargets.monthly}
+                    onChange={(e) => setEditTargets({ ...editTargets, monthly: Number(e.target.value) })}
+                    className="col-span-3"
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="quarterly" className="text-right text-sm">Quarterly (NPR)</Label>
+                  <Input
+                    id="quarterly"
+                    type="number"
+                    value={editTargets.quarterly}
+                    onChange={(e) => setEditTargets({ ...editTargets, quarterly: Number(e.target.value) })}
+                    className="col-span-3"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button onClick={handleUpdateTargets} disabled={updateTargetsMutation.isPending}>
+                  Save changes
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -129,26 +221,26 @@ export default function Dashboard() {
           title="Weekly Sales"
           value={formatCurrency(safeStats.weeklySales)}
           icon={CalendarIcon}
-          target={1550000}
+          target={targets?.weekly || 1550000}
           current={safeStats.weeklySales}
-          description="NPR 15,500"
+          description={`Target: NPR ${((targets?.weekly || 1550000) / 100).toLocaleString()}`}
         />
         <StatsCard
           title="Monthly Sales"
           value={formatCurrency(safeStats.monthlySales)}
           icon={TrendingUp}
-          target={6670000} // Target in cents
+          target={targets?.monthly || 6670000}
           current={safeStats.monthlySales}
-          description="NPR 66,700"
+          description={`Target: NPR ${((targets?.monthly || 6670000) / 100).toLocaleString()}`}
           colorClass="text-accent"
         />
         <StatsCard
           title="Quarterly Sales"
           value={formatCurrency(safeStats.quarterlySales)}
           icon={Award}
-          target={20000000} // Target in cents
+          target={targets?.quarterly || 20000000}
           current={safeStats.quarterlySales}
-          description="NPR 200,000"
+          description={`Target: NPR ${((targets?.quarterly || 20000000) / 100).toLocaleString()}`}
           colorClass="text-purple-500"
         />
       </div>

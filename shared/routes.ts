@@ -142,6 +142,29 @@ export const api = {
         200: z.any(),
       },
     },
+    get_targets: {
+      method: 'GET' as const,
+      path: '/api/dashboard/targets',
+      responses: {
+        200: z.object({
+          weekly: z.number(),
+          monthly: z.number(),
+          quarterly: z.number(),
+        }),
+      },
+    },
+    update_targets: {
+      method: 'POST' as const,
+      path: '/api/dashboard/targets',
+      input: z.object({
+        weekly: z.number(),
+        monthly: z.number(),
+        quarterly: z.number(),
+      }),
+      responses: {
+        200: z.object({ message: z.string() }),
+      },
+    },
   },
 };
 

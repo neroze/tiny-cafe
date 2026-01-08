@@ -1,6 +1,6 @@
 import { db } from "./db";
 import {
-  items, sales, stock,
+  items, sales, stock, settings,
   type Item, type InsertItem,
   type Sale, type InsertSale,
   type Stock, type InsertStock,
@@ -42,6 +42,10 @@ export interface IStorage {
   // Stock
   getStock(date?: Date): Promise<(Stock & { item: Item })[]>;
   recordStockTransaction(data: CreateStockTransactionRequest): Promise<Stock>;
+
+  // Settings
+  getSetting(key: string): Promise<string | undefined>;
+  setSetting(key: string, value: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -320,6 +324,20 @@ export class DatabaseStorage implements IStorage {
       },
       sales: salesData
     };
+  }
+
+  async getSetting(key: string): Promise<string | undefined> {
+    const [setting] = await db.select().from(settings).where(eq(settings.key, key));
+    return setting?.value;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    const existing = await this.getSetting(key);
+    if (existing !== undefined) {
+      await db.update(settings).set({ value, updatedAt: new Date() }).where(eq(settings.key, key));
+    } else {
+      await db.insert(settings).values({ key, value });
+    }
   }
 }
 
