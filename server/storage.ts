@@ -28,6 +28,16 @@ export interface IStorage {
     topItems: { name: string; quantity: number; total: number }[];
     itemSalesTrend: { date: string; items: Record<string, number> }[];
   }>;
+  getExportData(from: Date, to: Date): Promise<{
+    summary: {
+      totalRevenue: number;
+      totalItemsSold: number;
+      topCategory: string;
+      averageOrderValue: number;
+      wastageTotal: number;
+    };
+    sales: (Sale & { item: Item })[];
+  }>;
 
   // Stock
   getStock(date?: Date): Promise<(Stock & { item: Item })[]>;
@@ -256,6 +266,59 @@ export class DatabaseStorage implements IStorage {
       quarterlySales,
       topItems,
       itemSalesTrend
+    };
+  }
+
+  async getExportData(from: Date, to: Date) {
+    const start = startOfDay(from);
+    const end = endOfDay(to);
+
+    const salesData = await db.select({
+      id: sales.id,
+      date: sales.date,
+      itemId: sales.itemId,
+      quantity: sales.quantity,
+      unitPrice: sales.unitPrice,
+      total: sales.total,
+      createdAt: sales.createdAt,
+      item: items
+    })
+    .from(sales)
+    .innerJoin(items, eq(sales.itemId, items.id))
+    .where(and(gte(sales.date, start), lte(sales.date, end)))
+    .orderBy(desc(sales.date));
+
+    const stockData = await db.select({
+      wastage: sum(stock.wastage)
+    })
+    .from(stock)
+    .where(and(gte(stock.date, start), lte(stock.date, end)));
+
+    const topCategoryRes = await db.select({
+      category: items.category,
+      total: sum(sales.total)
+    })
+    .from(sales)
+    .innerJoin(items, eq(sales.itemId, items.id))
+    .where(and(gte(sales.date, start), lte(sales.date, end)))
+    .groupBy(items.category)
+    .orderBy(desc(sum(sales.total)))
+    .limit(1);
+
+    const totalRevenue = salesData.reduce((sum, s) => sum + s.total, 0);
+    const totalItemsSold = salesData.reduce((sum, s) => sum + s.quantity, 0);
+    const averageOrderValue = salesData.length > 0 ? totalRevenue / salesData.length : 0;
+    const wastageTotal = Number(stockData[0]?.wastage) || 0;
+
+    return {
+      summary: {
+        totalRevenue,
+        totalItemsSold,
+        topCategory: topCategoryRes[0]?.category || 'N/A',
+        averageOrderValue,
+        wastageTotal
+      },
+      sales: salesData
     };
   }
 }

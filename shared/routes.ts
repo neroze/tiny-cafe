@@ -131,6 +131,17 @@ export const api = {
         }),
       },
     },
+    export: {
+      method: 'GET' as const,
+      path: '/api/dashboard/export',
+      input: z.object({
+        from: z.string(),
+        to: z.string(),
+      }),
+      responses: {
+        200: z.any(),
+      },
+    },
   },
 };
 

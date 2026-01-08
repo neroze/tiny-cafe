@@ -125,8 +125,39 @@ export async function registerRoutes(
 
   // Dashboard
   app.get(api.dashboard.stats.path, async (req, res) => {
-    const stats = await storage.getDashboardStats();
+    const stats = await storage.getDashboardStats(req.query.range as any);
     res.json(stats);
+  });
+
+  app.get(api.dashboard.export.path, async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(req.query.from as string) : new Date();
+      const to = req.query.to ? new Date(req.query.to as string) : new Date();
+      
+      const data = await storage.getExportData(from, to);
+      
+      let csv = "EXECUTIVE SUMMARY\n";
+      csv += `Report Period,${from.toLocaleDateString()} to ${to.toLocaleDateString()}\n`;
+      csv += `Total Revenue,NPR ${(data.summary.totalRevenue / 100).toFixed(2)}\n`;
+      csv += `Total Items Sold,${data.summary.totalItemsSold}\n`;
+      csv += `Average Order Value,NPR ${(data.summary.averageOrderValue / 100).toFixed(2)}\n`;
+      csv += `Top Performing Category,${data.summary.topCategory}\n`;
+      csv += `Total Stock Wastage,${data.summary.wastageTotal} units\n\n`;
+      
+      csv += "DETAILED SALES REPORT\n";
+      csv += "ID,Date,Item,Category,Quantity,Unit Price (NPR),Total (NPR)\n";
+      
+      data.sales.forEach(s => {
+        csv += `${s.id},${s.date.toLocaleDateString()},"${s.item.name}",${s.item.category},${s.quantity},${(s.unitPrice / 100).toFixed(2)},${(s.total / 100).toFixed(2)}\n`;
+      });
+      
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename=cafe_report_${from.toISOString().split('T')[0]}.csv`);
+      res.send(csv);
+    } catch (err) {
+      console.error("Export error:", err);
+      res.status(500).json({ message: "Failed to generate report" });
+    }
   });
 
   await seedDatabase();

@@ -1,15 +1,25 @@
+import * as React from "react";
 import { useDashboardStats } from "@/hooks/use-dashboard";
 import { Layout } from "@/components/layout";
 import { StatsCard } from "@/components/stats-card";
-import { DollarSign, Calendar, TrendingUp, Award, ArrowUpRight } from "lucide-react";
+import { DollarSign, Calendar as CalendarIcon, TrendingUp, Award, ArrowUpRight, Download } from "lucide-react";
 import { Card } from "@/components/ui-components";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend, CartesianGrid } from "recharts";
 import { motion } from "framer-motion";
-import { useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+import { api } from "@shared/routes";
 
 export default function Dashboard() {
-  const [range, setRange] = useState<'weekly' | 'monthly' | 'quarterly'>('weekly');
+  const [range, setRange] = React.useState<'weekly' | 'monthly' | 'quarterly'>('weekly');
+  const [dateRange, setDateRange] = React.useState<{ from: Date; to: Date }>({
+    from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+    to: new Date()
+  });
   const { data: stats, isLoading } = useDashboardStats(range);
 
   if (isLoading) {
@@ -23,6 +33,11 @@ export default function Dashboard() {
   }
 
   const formatCurrency = (val: number) => `NPR ${(val / 100).toLocaleString()}`;
+
+  const handleExport = () => {
+    const url = `${api.dashboard.export.path}?from=${dateRange.from.toISOString()}&to=${dateRange.to.toISOString()}`;
+    window.location.href = url;
+  };
 
   // Use a fallback if stats aren't loaded properly
   const safeStats = stats || {
@@ -53,14 +68,54 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mb-8"
-      >
-        <h1 className="text-4xl font-display font-bold text-foreground">Good Morning!</h1>
-        <p className="text-muted-foreground mt-2 text-lg">Here's what's happening at the café today.</p>
-      </motion.div>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <h1 className="text-4xl font-display font-bold text-foreground">Good Morning!</h1>
+          <p className="text-muted-foreground mt-2 text-lg">Here's what's happening at the café today.</p>
+        </motion.div>
+
+        <div className="flex items-center gap-3">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className={cn("justify-start text-left font-normal w-[240px]", !dateRange && "text-muted-foreground")}>
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {dateRange?.from ? (
+                  dateRange.to ? (
+                    <>
+                      {format(dateRange.from, "LLL dd, y")} -{" "}
+                      {format(dateRange.to, "LLL dd, y")}
+                    </>
+                  ) : (
+                    format(dateRange.from, "LLL dd, y")
+                  )
+                ) : (
+                  <span>Pick a date range</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <CalendarComponent
+                initialFocus
+                mode="range"
+                defaultMonth={dateRange?.from}
+                selected={{ from: dateRange.from, to: dateRange.to }}
+                onSelect={(range: any) => {
+                  if (range?.from) {
+                    setDateRange({ from: range.from, to: range.to || range.from });
+                  }
+                }}
+                numberOfMonths={2}
+              />
+            </PopoverContent>
+          </Popover>
+          <Button onClick={handleExport} className="gap-2">
+            <Download className="w-4 h-4" /> Export CSV
+          </Button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatsCard
@@ -73,8 +128,8 @@ export default function Dashboard() {
         <StatsCard
           title="Weekly Sales"
           value={formatCurrency(safeStats.weeklySales)}
-          icon={Calendar}
-          target={1550000} // Target in cents
+          icon={CalendarIcon}
+          target={1550000}
           current={safeStats.weeklySales}
           description="NPR 15,500"
         />
