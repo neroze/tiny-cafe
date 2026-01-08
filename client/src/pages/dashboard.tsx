@@ -3,11 +3,14 @@ import { Layout } from "@/components/layout";
 import { StatsCard } from "@/components/stats-card";
 import { DollarSign, Calendar, TrendingUp, Award, ArrowUpRight } from "lucide-react";
 import { Card } from "@/components/ui-components";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend, CartesianGrid } from "recharts";
 import { motion } from "framer-motion";
+import { useState } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export default function Dashboard() {
-  const { data: stats, isLoading } = useDashboardStats();
+  const [range, setRange] = useState<'weekly' | 'monthly' | 'quarterly'>('weekly');
+  const { data: stats, isLoading } = useDashboardStats(range);
 
   if (isLoading) {
     return (
@@ -27,7 +30,8 @@ export default function Dashboard() {
     weeklySales: 0,
     monthlySales: 0,
     quarterlySales: 0,
-    topItems: []
+    topItems: [],
+    itemSalesTrend: []
   };
 
   const chartData = safeStats.topItems.map(item => ({
@@ -36,7 +40,16 @@ export default function Dashboard() {
     total: item.total / 100
   }));
 
-  const colors = ['#d4a373', '#ccd5ae', '#e9edc9', '#faedcd', '#d6ccc2'];
+  const trendData = safeStats.itemSalesTrend.map(t => ({
+    date: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    ...Object.fromEntries(
+      Object.entries(t.items).map(([name, total]) => [name, total / 100])
+    )
+  }));
+
+  const itemNames = Array.from(new Set(safeStats.itemSalesTrend.flatMap(t => Object.keys(t.items))));
+
+  const colors = ['#d4a373', '#ccd5ae', '#e9edc9', '#faedcd', '#d6ccc2', '#e76f51', '#264653', '#2a9d8f', '#e9c46a', '#f4a261'];
 
   return (
     <Layout>
@@ -85,8 +98,72 @@ export default function Dashboard() {
         />
       </div>
 
+      <div className="grid grid-cols-1 gap-8 mb-8">
+        <Card className="w-full">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+            <div>
+              <h2 className="text-xl font-bold font-display">Sales Trend by Item</h2>
+              <p className="text-sm text-muted-foreground">Detailed performance tracking per item</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-muted-foreground">Range:</span>
+              <Select value={range} onValueChange={(v: any) => setRange(v)}>
+                <SelectTrigger className="w-[140px] h-9">
+                  <SelectValue placeholder="Select range" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="quarterly">Quarterly</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="h-[400px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={trendData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                <XAxis 
+                  dataKey="date" 
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                  dy={10}
+                />
+                <YAxis 
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                  tickFormatter={(val) => `NPR ${val}`}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    borderRadius: '12px', 
+                    border: '1px solid hsl(var(--border))', 
+                    backgroundColor: 'hsl(var(--background))',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' 
+                  }}
+                  itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
+                />
+                <Legend iconType="circle" />
+                {itemNames.map((name, index) => (
+                  <Line
+                    key={name}
+                    type="monotone"
+                    dataKey={name}
+                    stroke={colors[index % colors.length]}
+                    strokeWidth={3}
+                    dot={{ r: 4, strokeWidth: 2, fill: 'hsl(var(--background))' }}
+                    activeDot={{ r: 6, strokeWidth: 0 }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Top Items List */}
         <div className="lg:col-span-2">
           <Card className="h-full">
             <div className="flex justify-between items-center mb-6">
@@ -134,7 +211,6 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* Sales Chart */}
         <div className="lg:col-span-1">
           <Card className="h-full flex flex-col">
             <h2 className="text-xl font-bold font-display mb-6">Sales Distribution</h2>
