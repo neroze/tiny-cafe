@@ -193,7 +193,7 @@ export default function SalesEntry() {
                   }}
                 />
                 {showSuggestions && filteredSuggestions.length > 0 && (
-                  <Card className="absolute z-50 w-full mt-1 p-1 max-h-40 overflow-y-auto shadow-lg border-border">
+                  <Card className="absolute z-50 w-full mt-1 p-1 max-h-40 overflow-y-auto shadow-lg border-border bg-background">
                     <div className="flex flex-col">
                       {filteredSuggestions.map((suggestion: string) => (
                         <button

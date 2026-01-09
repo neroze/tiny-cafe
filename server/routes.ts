@@ -187,7 +187,39 @@ export async function registerRoutes(
   });
 
   app.get(api.dashboard.labels.path, async (req, res) => {
-    const labels = await storage.getUniqueLabels();
+    const configuredLabels = await storage.getSetting('configured_labels');
+    const labels = configuredLabels ? JSON.parse(configuredLabels) : [];
+    const uniqueLabels = await storage.getUniqueLabels();
+    
+    // Merge configured labels with existing ones from sales
+    const merged = Array.from(new Set([...labels, ...uniqueLabels]));
+    res.json(merged);
+  });
+
+  app.get("/api/config/labels", async (req, res) => {
+    const labelsStr = await storage.getSetting('configured_labels');
+    res.json(labelsStr ? JSON.parse(labelsStr) : []);
+  });
+
+  app.post("/api/config/labels", async (req, res) => {
+    const { label } = req.body;
+    if (!label) return res.status(400).json({ message: "Label required" });
+    
+    const labelsStr = await storage.getSetting('configured_labels');
+    let labels = labelsStr ? JSON.parse(labelsStr) : [];
+    if (!labels.includes(label)) {
+      labels.push(label);
+      await storage.setSetting('configured_labels', JSON.stringify(labels));
+    }
+    res.json(labels);
+  });
+
+  app.delete("/api/config/labels", async (req, res) => {
+    const { label } = req.body;
+    const labelsStr = await storage.getSetting('configured_labels');
+    let labels = labelsStr ? JSON.parse(labelsStr) : [];
+    labels = labels.filter((l: string) => l !== label);
+    await storage.setSetting('configured_labels', JSON.stringify(labels));
     res.json(labels);
   });
 
