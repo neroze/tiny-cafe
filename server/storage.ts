@@ -271,17 +271,46 @@ export class DatabaseStorage implements IStorage {
       items
     }));
 
+    // Label distribution
+    const labelDistributionMap = new Map<string, number>();
+    const allSales = await db.select({ labels: sales.labels, total: sales.total })
+      .from(sales)
+      .where(gte(sales.date, startDate));
+
+    allSales.forEach(s => {
+      if (s.labels && s.labels.length > 0) {
+        s.labels.forEach(label => {
+          labelDistributionMap.set(label, (labelDistributionMap.get(label) || 0) + Number(s.total));
+        });
+      }
+    });
+
+    const labelDistribution = Array.from(labelDistributionMap.entries()).map(([name, value]) => ({
+      name,
+      value: value / 100 // Convert to NPR
+    })).sort((a, b) => b.value - a.value);
+
     return {
       dailySales,
       weeklySales,
       monthlySales,
       quarterlySales,
       topItems,
-      itemSalesTrend
+      itemSalesTrend,
+      labelDistribution
     };
   }
 
-  async getExportData(from: Date, to: Date) {
+  async getExportData(from: Date, to: Date): Promise<{
+    summary: {
+      totalRevenue: number;
+      totalItemsSold: number;
+      topCategory: string;
+      averageOrderValue: number;
+      wastageTotal: number;
+    };
+    sales: (Sale & { item: Item })[];
+  }> {
     const start = startOfDay(from);
     const end = endOfDay(to);
 
@@ -292,6 +321,7 @@ export class DatabaseStorage implements IStorage {
       quantity: sales.quantity,
       unitPrice: sales.unitPrice,
       total: sales.total,
+      labels: sales.labels,
       createdAt: sales.createdAt,
       item: items
     })
@@ -330,7 +360,7 @@ export class DatabaseStorage implements IStorage {
         averageOrderValue,
         wastageTotal
       },
-      sales: salesData
+      sales: salesData as any
     };
   }
 

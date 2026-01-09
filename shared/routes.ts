@@ -128,6 +128,10 @@ export const api = {
             date: z.string(),
             items: z.record(z.string(), z.number()),
           })),
+          labelDistribution: z.array(z.object({
+            name: z.string(),
+            value: z.number(),
+          })),
         }),
       },
     },

@@ -4,7 +4,7 @@ import { Layout } from "@/components/layout";
 import { StatsCard } from "@/components/stats-card";
 import { DollarSign, Calendar as CalendarIcon, TrendingUp, Award, ArrowUpRight, Download, Settings as SettingsIcon } from "lucide-react";
 import { Card } from "@/components/ui-components";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend, CartesianGrid } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend, CartesianGrid, PieChart, Pie } from "recharts";
 import { motion } from "framer-motion";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -89,23 +89,24 @@ export default function Dashboard() {
     monthlySales: 0,
     quarterlySales: 0,
     topItems: [],
-    itemSalesTrend: []
+    itemSalesTrend: [],
+    labelDistribution: []
   };
 
-  const chartData = safeStats.topItems.map(item => ({
+  const chartData = safeStats.topItems.map((item: any) => ({
     name: item.name,
     sales: item.quantity,
     total: item.total / 100
   }));
 
-  const trendData = safeStats.itemSalesTrend.map(t => ({
+  const trendData = safeStats.itemSalesTrend.map((t: any) => ({
     date: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     ...Object.fromEntries(
-      Object.entries(t.items).map(([name, total]) => [name, total / 100])
+      Object.entries(t.items).map(([name, total]) => [name, (total as number) / 100])
     )
   }));
 
-  const itemNames = Array.from(new Set(safeStats.itemSalesTrend.flatMap(t => Object.keys(t.items))));
+  const itemNames = Array.from(new Set(safeStats.itemSalesTrend.flatMap((t: any) => Object.keys(t.items))));
 
   const colors = ['#d4a373', '#ccd5ae', '#e9edc9', '#faedcd', '#d6ccc2', '#e76f51', '#264653', '#2a9d8f', '#e9c46a', '#f4a261'];
 
@@ -311,6 +312,42 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-1">
+          <Card className="h-full flex flex-col">
+            <h2 className="text-xl font-bold font-display mb-6">Label Distribution</h2>
+            <div className="flex-1 min-h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={safeStats.labelDistribution}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={80}
+                    paddingAngle={5}
+                  >
+                    {safeStats.labelDistribution.map((_entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}
+                    formatter={(value: number) => `NPR ${value.toLocaleString()}`}
+                  />
+                  <Legend verticalAlign="bottom" height={36}/>
+                </PieChart>
+              </ResponsiveContainer>
+              {safeStats.labelDistribution.length === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm">
+                  No label data available
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+
         <div className="lg:col-span-2">
           <Card className="h-full">
             <div className="flex justify-between items-center mb-6">
@@ -371,7 +408,7 @@ export default function Dashboard() {
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}
                   />
                   <Bar dataKey="total" radius={[0, 4, 4, 0]} barSize={32}>
-                    {chartData.map((entry, index) => (
+                    {chartData.map((_entry: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
                     ))}
                   </Bar>
