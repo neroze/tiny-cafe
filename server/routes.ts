@@ -144,6 +144,35 @@ export async function registerRoutes(
       csv += `Average Order Value,NPR ${(data.summary.averageOrderValue / 100).toFixed(2)}\n`;
       csv += `Top Performing Category,${data.summary.topCategory}\n`;
       csv += `Total Stock Wastage,${data.summary.wastageTotal} units\n\n`;
+
+      csv += "SALES BY ITEM SUMMARY\n";
+      csv += "Item,Total Quantity,Total Revenue (NPR)\n";
+      const itemStats: Record<string, { qty: number, total: number }> = {};
+      data.sales.forEach(s => {
+        if (!itemStats[s.item.name]) itemStats[s.item.name] = { qty: 0, total: 0 };
+        itemStats[s.item.name].qty += s.quantity;
+        itemStats[s.item.name].total += s.total;
+      });
+      Object.entries(itemStats).forEach(([name, stats]) => {
+        csv += `"${name}",${stats.qty},${(stats.total / 100).toFixed(2)}\n`;
+      });
+      csv += "\n";
+
+      csv += "SALES BY LABEL SUMMARY\n";
+      csv += "Label,Total Quantity,Total Revenue (NPR)\n";
+      const summaryLabelStats: Record<string, { qty: number, total: number }> = {};
+      data.sales.forEach(s => {
+        const labels = s.labels || [];
+        labels.forEach((l: string) => {
+          if (!summaryLabelStats[l]) summaryLabelStats[l] = { qty: 0, total: 0 };
+          summaryLabelStats[l].qty += s.quantity;
+          summaryLabelStats[l].total += s.total;
+        });
+      });
+      Object.entries(summaryLabelStats).forEach(([label, stats]) => {
+        csv += `"${label}",${stats.qty},${(stats.total / 100).toFixed(2)}\n`;
+      });
+      csv += "\n";
       
       csv += "DETAILED SALES REPORT\n";
       csv += "ID,Date,Item,Category,Quantity,Unit Cost (NPR),Selling Price (NPR),Labels,Total (NPR)\n";
