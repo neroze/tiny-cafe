@@ -252,6 +252,33 @@ export async function registerRoutes(
     res.json(labels);
   });
 
+  app.get("/api/config/categories", async (req, res) => {
+    const catsStr = await storage.getSetting('configured_categories');
+    res.json(catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"]);
+  });
+
+  app.post("/api/config/categories", async (req, res) => {
+    const { category } = req.body;
+    if (!category) return res.status(400).json({ message: "Category required" });
+    
+    const catsStr = await storage.getSetting('configured_categories');
+    let cats = catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"];
+    if (!cats.includes(category)) {
+      cats.push(category);
+      await storage.setSetting('configured_categories', JSON.stringify(cats));
+    }
+    res.json(cats);
+  });
+
+  app.delete("/api/config/categories", async (req, res) => {
+    const { category } = req.body;
+    const catsStr = await storage.getSetting('configured_categories');
+    let cats = catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"];
+    cats = cats.filter((c: string) => c !== category);
+    await storage.setSetting('configured_categories', JSON.stringify(cats));
+    res.json(cats);
+  });
+
   await seedDatabase();
 
   return httpServer;

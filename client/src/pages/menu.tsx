@@ -5,6 +5,7 @@ import { useItems, useCreateItem, useUpdateItem, useDeleteItem } from "@/hooks/u
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Edit2, Trash2, X, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useQuery } from "@tanstack/react-query";
 import type { InsertItem } from "@shared/routes";
 
 export default function MenuItems() {
@@ -128,6 +129,10 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
   
   const isEditing = !!initialData?.id;
 
+  const { data: configCategories = [] } = useQuery({
+    queryKey: ["/api/config/categories"],
+  });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
@@ -153,6 +158,8 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
     }
   };
 
+  const categories = configCategories.length > 0 ? configCategories : ["Drinks", "Snacks", "Main", "Dessert"];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-background sm:max-w-[425px]">
@@ -169,11 +176,10 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
           
           <div>
             <label className="block text-sm font-medium mb-1">Category</label>
-            <Select name="category" defaultValue={initialData?.category || "Drinks"}>
-              <option value="Drinks">Drinks</option>
-              <option value="Snacks">Snacks</option>
-              <option value="Main">Main Course</option>
-              <option value="Dessert">Dessert</option>
+            <Select name="category" defaultValue={initialData?.category || categories[0]}>
+              {categories.map((cat: string) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
             </Select>
           </div>
 

@@ -47,10 +47,16 @@ export default function Dashboard() {
   const [editTargets, setEditTargets] = React.useState({ weekly: 0, monthly: 0, quarterly: 0 });
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
   const [isLabelsDialogOpen, setIsLabelsDialogOpen] = React.useState(false);
+  const [isCategoriesDialogOpen, setIsCategoriesDialogOpen] = React.useState(false);
   const [newConfigLabel, setNewConfigLabel] = React.useState("");
+  const [newConfigCategory, setNewConfigCategory] = React.useState("");
 
   const { data: configLabels = [] } = useQuery({
     queryKey: ["/api/config/labels"],
+  });
+
+  const { data: configCategories = [] } = useQuery({
+    queryKey: ["/api/config/categories"],
   });
 
   const addLabelMutation = useMutation({
@@ -69,6 +75,25 @@ export default function Dashboard() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/config/labels"] });
+    }
+  });
+
+  const addCategoryMutation = useMutation({
+    mutationFn: async (category: string) => {
+      await apiRequest("POST", "/api/config/categories", { category });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/config/categories"] });
+      setNewConfigCategory("");
+    }
+  });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: async (category: string) => {
+      await apiRequest("DELETE", "/api/config/categories", { category });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/config/categories"] });
     }
   });
 
@@ -279,6 +304,56 @@ export default function Dashboard() {
                   ))}
                   {configLabels.length === 0 && (
                     <p className="text-sm text-muted-foreground w-full text-center py-4">No configured labels yet.</p>
+                  )}
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={isCategoriesDialogOpen} onOpenChange={setIsCategoriesDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="icon" title="Configure Categories">
+                <SettingsIcon className="w-4 h-4 rotate-45" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Configure Menu Categories</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="flex gap-2">
+                  <Input 
+                    placeholder="New category name..." 
+                    value={newConfigCategory}
+                    onChange={(e) => setNewConfigCategory(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newConfigCategory.trim()) {
+                        addCategoryMutation.mutate(newConfigCategory.trim());
+                      }
+                    }}
+                  />
+                  <Button 
+                    size="sm" 
+                    onClick={() => newConfigCategory.trim() && addCategoryMutation.mutate(newConfigCategory.trim())}
+                    disabled={addCategoryMutation.isPending}
+                  >
+                    Add
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto p-1">
+                  {configCategories.map((cat: string) => (
+                    <Badge key={cat} variant="secondary" className="gap-1 px-2 py-1">
+                      {cat}
+                      <button 
+                        className="hover:text-destructive"
+                        onClick={() => deleteCategoryMutation.mutate(cat)}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                  {configCategories.length === 0 && (
+                    <p className="text-sm text-muted-foreground w-full text-center py-4">No configured categories yet.</p>
                   )}
                 </div>
               </div>
