@@ -85,7 +85,8 @@ export async function registerRoutes(
         quantity,
         unitPrice,
         total,
-        date
+        date,
+        labels: rawData.labels || []
       });
       
       const sale = await storage.createSale(input);

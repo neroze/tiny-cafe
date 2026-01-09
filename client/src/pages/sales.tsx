@@ -5,7 +5,8 @@ import { useItems } from "@/hooks/use-items";
 import { useCreateSale, useSales } from "@/hooks/use-sales";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { Plus, Coffee } from "lucide-react";
+import { Plus, Coffee, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export default function SalesEntry() {
   const { toast } = useToast();
@@ -16,6 +17,8 @@ export default function SalesEntry() {
   const [itemId, setItemId] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [customPrice, setCustomPrice] = useState(""); // Optional custom price overrides
+  const [labels, setLabels] = useState<string[]>([]);
+  const [currentLabel, setCurrentLabel] = useState("");
 
   // Queries
   const { data: items = [] } = useItems();
@@ -45,7 +48,8 @@ export default function SalesEntry() {
         itemId: selectedItem.id,
         quantity: Number(quantity),
         unitPrice: Math.round(unitPrice * 100), // Convert back to cents
-        total: Math.round(total * 100)
+        total: Math.round(total * 100),
+        labels: labels
       });
       
       toast({
@@ -57,6 +61,7 @@ export default function SalesEntry() {
       setQuantity("1");
       setItemId("");
       setCustomPrice("");
+      setLabels([]);
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -135,6 +140,39 @@ export default function SalesEntry() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">Labels (Press Enter to add)</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {labels.map((label, idx) => (
+                    <Badge key={idx} variant="secondary" className="gap-1 px-2 py-1">
+                      {label}
+                      <button
+                        type="button"
+                        onClick={() => setLabels(labels.filter((_, i) => i !== idx))}
+                        className="hover:text-destructive"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+                <Input
+                  placeholder="Add label..."
+                  value={currentLabel}
+                  onChange={(e) => setCurrentLabel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const val = currentLabel.trim();
+                      if (val && !labels.includes(val)) {
+                        setLabels([...labels, val]);
+                        setCurrentLabel("");
+                      }
+                    }
+                  }}
+                />
+              </div>
+
               <div className="pt-4 border-t border-border mt-4">
                 <div className="flex justify-between items-center mb-4">
                   <span className="text-lg font-bold">Total</span>
@@ -180,7 +218,16 @@ export default function SalesEntry() {
                         {format(new Date(sale.createdAt || new Date()), "hh:mm a")}
                       </td>
                       <td className="py-3 font-medium text-foreground">
-                        {sale.item?.name}
+                        <div>{sale.item?.name}</div>
+                        {sale.labels && sale.labels.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {sale.labels.map((label: string, i: number) => (
+                              <Badge key={i} variant="outline" className="text-[10px] px-1 py-0 h-4 uppercase">
+                                {label}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td className="py-3 text-center text-muted-foreground">
                         <span className="inline-flex items-center justify-center bg-secondary w-8 h-8 rounded-full text-xs font-bold">

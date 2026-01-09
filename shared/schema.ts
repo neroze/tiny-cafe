@@ -1,7 +1,7 @@
 import { pgTable, text, serial, integer, boolean, timestamp, decimal } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 export const items = pgTable("items", {
   id: serial("id").primaryKey(),
@@ -21,6 +21,7 @@ export const sales = pgTable("sales", {
   quantity: integer("quantity").notNull(),
   unitPrice: integer("unit_price").notNull(), // Snapshot of price at sale time
   total: integer("total").notNull(),
+  labels: text("labels").array().default(sql`ARRAY[]::text[]`),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
