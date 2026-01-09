@@ -27,13 +27,21 @@ export default function SalesEntry() {
     queryKey: [api.dashboard.labels.path],
   });
 
+  const { data: configLabels = [] } = useQuery({
+    queryKey: ["/api/config/labels"],
+  });
+
+  const allAvailableLabels = useMemo(() => {
+    return Array.from(new Set([...(availableLabels as string[]), ...(configLabels as string[])]));
+  }, [availableLabels, configLabels]);
+
   const filteredSuggestions = useMemo(() => {
     const search = currentLabel.toLowerCase().trim();
     if (!search) return [];
-    return (availableLabels as string[]).filter((l: string) => 
+    return allAvailableLabels.filter((l: string) => 
       l.toLowerCase().includes(search) && !labels.includes(l)
     );
-  }, [availableLabels, currentLabel, labels]);
+  }, [allAvailableLabels, currentLabel, labels]);
 
   // Queries
   const { data: items = [] } = useItems();
