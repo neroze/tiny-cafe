@@ -186,6 +186,11 @@ export async function registerRoutes(
     }
   });
 
+  app.get(api.dashboard.labels.path, async (req, res) => {
+    const labels = await storage.getUniqueLabels();
+    res.json(labels);
+  });
+
   await seedDatabase();
 
   return httpServer;

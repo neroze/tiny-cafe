@@ -46,6 +46,9 @@ export interface IStorage {
   // Settings
   getSetting(key: string): Promise<string | undefined>;
   setSetting(key: string, value: string): Promise<void>;
+
+  // Labels
+  getUniqueLabels(): Promise<string[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -338,6 +341,17 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.insert(settings).values({ key, value });
     }
+  }
+
+  async getUniqueLabels(): Promise<string[]> {
+    const result = await db.select({ labels: sales.labels }).from(sales);
+    const labelSet = new Set<string>();
+    result.forEach(row => {
+      if (row.labels) {
+        row.labels.forEach(l => labelSet.add(l));
+      }
+    });
+    return Array.from(labelSet).sort();
   }
 }
 

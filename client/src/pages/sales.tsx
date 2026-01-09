@@ -19,6 +19,19 @@ export default function SalesEntry() {
   const [customPrice, setCustomPrice] = useState(""); // Optional custom price overrides
   const [labels, setLabels] = useState<string[]>([]);
   const [currentLabel, setCurrentLabel] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const { data: availableLabels = [] } = useQuery({
+    queryKey: [api.dashboard.labels.path],
+  });
+
+  const filteredSuggestions = useMemo(() => {
+    const search = currentLabel.toLowerCase().trim();
+    if (!search) return [];
+    return availableLabels.filter(l => 
+      l.toLowerCase().includes(search) && !labels.includes(l)
+    );
+  }, [availableLabels, currentLabel, labels]);
 
   // Queries
   const { data: items = [] } = useItems();
@@ -140,7 +153,7 @@ export default function SalesEntry() {
                 </div>
               </div>
 
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-medium text-muted-foreground mb-1">Labels (Press Enter to add)</label>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {labels.map((label, idx) => (
@@ -159,7 +172,12 @@ export default function SalesEntry() {
                 <Input
                   placeholder="Add label..."
                   value={currentLabel}
-                  onChange={(e) => setCurrentLabel(e.target.value)}
+                  onChange={(e) => {
+                    setCurrentLabel(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                  onFocus={() => setShowSuggestions(true)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -167,10 +185,31 @@ export default function SalesEntry() {
                       if (val && !labels.includes(val)) {
                         setLabels([...labels, val]);
                         setCurrentLabel("");
+                        setShowSuggestions(false);
                       }
                     }
                   }}
                 />
+                {showSuggestions && filteredSuggestions.length > 0 && (
+                  <Card className="absolute z-50 w-full mt-1 p-1 max-h-40 overflow-y-auto shadow-lg border-border">
+                    <div className="flex flex-col">
+                      {filteredSuggestions.map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          className="text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground rounded-sm transition-colors"
+                          onClick={() => {
+                            setLabels([...labels, suggestion]);
+                            setCurrentLabel("");
+                            setShowSuggestions(false);
+                          }}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </Card>
+                )}
               </div>
 
               <div className="pt-4 border-t border-border mt-4">

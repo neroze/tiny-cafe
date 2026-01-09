@@ -165,6 +165,13 @@ export const api = {
         200: z.object({ message: z.string() }),
       },
     },
+    labels: {
+      method: 'GET' as const,
+      path: '/api/sales/labels',
+      responses: {
+        200: z.array(z.string()),
+      },
+    },
   },
 };
 
