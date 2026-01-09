@@ -112,15 +112,16 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <h1 className="text-4xl font-display font-bold text-foreground">Good Morning!</h1>
-          <p className="text-muted-foreground mt-2 text-lg">Here's what's happening at the café today.</p>
-        </motion.div>
-
+      <div className="flex flex-col gap-8 pb-8">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <h1 className="text-4xl font-display font-bold text-foreground">Good Morning!</h1>
+            <p className="text-muted-foreground mt-2 text-lg">Here's what's happening at the café today.</p>
+          </motion.div>
+        </div>
         <div className="flex items-center gap-3">
           <Popover>
             <PopoverTrigger asChild>
