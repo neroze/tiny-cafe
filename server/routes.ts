@@ -146,10 +146,10 @@ export async function registerRoutes(
       csv += `Total Stock Wastage,${data.summary.wastageTotal} units\n\n`;
       
       csv += "DETAILED SALES REPORT\n";
-      csv += "ID,Date,Item,Category,Quantity,Unit Price (NPR),Total (NPR)\n";
+      csv += "ID,Date,Item,Category,Quantity,Unit Cost (NPR),Selling Price (NPR),Labels,Total (NPR)\n";
       
       data.sales.forEach(s => {
-        csv += `${s.id},${s.date.toLocaleDateString()},"${s.item.name}",${s.item.category},${s.quantity},${(s.unitPrice / 100).toFixed(2)},${(s.total / 100).toFixed(2)}\n`;
+        csv += `${s.id},${s.date.toLocaleDateString()},"${s.item.name}",${s.item.category},${s.quantity},${(s.item.costPrice / 100).toFixed(2)},${(s.unitPrice / 100).toFixed(2)},"${(s.labels || []).join(', ')}",${(s.total / 100).toFixed(2)}\n`;
       });
 
       // Label based grouping
