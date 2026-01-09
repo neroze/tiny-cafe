@@ -7,6 +7,8 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { Plus, Coffee, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@shared/routes";
 
 export default function SalesEntry() {
   const { toast } = useToast();
@@ -28,7 +30,7 @@ export default function SalesEntry() {
   const filteredSuggestions = useMemo(() => {
     const search = currentLabel.toLowerCase().trim();
     if (!search) return [];
-    return availableLabels.filter(l => 
+    return (availableLabels as string[]).filter((l: string) => 
       l.toLowerCase().includes(search) && !labels.includes(l)
     );
   }, [availableLabels, currentLabel, labels]);
@@ -193,7 +195,7 @@ export default function SalesEntry() {
                 {showSuggestions && filteredSuggestions.length > 0 && (
                   <Card className="absolute z-50 w-full mt-1 p-1 max-h-40 overflow-y-auto shadow-lg border-border">
                     <div className="flex flex-col">
-                      {filteredSuggestions.map((suggestion) => (
+                      {filteredSuggestions.map((suggestion: string) => (
                         <button
                           key={suggestion}
                           type="button"

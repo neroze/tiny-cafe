@@ -76,6 +76,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSales(date?: Date, limit: number = 50): Promise<(Sale & { item: Item })[]> {
+    return this.getSalesWithLabels(date, limit);
+  }
+
+  async getSalesWithLabels(date?: Date, limit: number = 50): Promise<(Sale & { item: Item })[]> {
     let query = db.select({
       id: sales.id,
       date: sales.date,
@@ -83,6 +87,7 @@ export class DatabaseStorage implements IStorage {
       quantity: sales.quantity,
       unitPrice: sales.unitPrice,
       total: sales.total,
+      labels: sales.labels,
       createdAt: sales.createdAt,
       item: items
     })
@@ -95,7 +100,7 @@ export class DatabaseStorage implements IStorage {
       query.where(and(gte(sales.date, start), lte(sales.date, end)));
     }
 
-    return await query.orderBy(desc(sales.date)).limit(limit);
+    return await query.orderBy(desc(sales.date)).limit(limit) as any;
   }
 
   async createSale(insertSale: InsertSale): Promise<Sale> {
