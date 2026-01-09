@@ -151,6 +151,31 @@ export async function registerRoutes(
       data.sales.forEach(s => {
         csv += `${s.id},${s.date.toLocaleDateString()},"${s.item.name}",${s.item.category},${s.quantity},${(s.unitPrice / 100).toFixed(2)},${(s.total / 100).toFixed(2)}\n`;
       });
+
+      // Label based grouping
+      const labelStats: Record<string, { items: Record<string, { qty: number, cost: number, total: number }> }> = {};
+      data.sales.forEach(s => {
+        const labels = s.labels || [];
+        labels.forEach((l: string) => {
+          if (!labelStats[l]) labelStats[l] = { items: {} };
+          const itemName = s.item.name;
+          if (!labelStats[l].items[itemName]) {
+            labelStats[l].items[itemName] = { qty: 0, cost: s.unitPrice, total: 0 };
+          }
+          labelStats[l].items[itemName].qty += s.quantity;
+          labelStats[l].items[itemName].total += s.total;
+        });
+      });
+
+      if (Object.keys(labelStats).length > 0) {
+        csv += "\nLABEL BASED REPORT\n";
+        Object.entries(labelStats).forEach(([label, stats]) => {
+          csv += `Label: ${label}\n`;
+          Object.entries(stats.items).forEach(([itemName, item]) => {
+            csv += `- ${itemName}: ${item.qty} | unit cost ${(item.cost / 100).toFixed(2)} | total sales: ${(item.total / 100).toFixed(2)}\n`;
+          });
+        });
+      }
       
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename=cafe_report_${from.toISOString().split('T')[0]}.csv`);
