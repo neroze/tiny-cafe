@@ -314,9 +314,9 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1">
-          <Card className="h-full flex flex-col">
+          <Card className="h-full flex flex-col relative">
             <h2 className="text-xl font-bold font-display mb-6">Label Distribution</h2>
-            <div className="flex-1 min-h-[300px]">
+            <div className="flex-1 min-h-[300px] relative">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -341,7 +341,7 @@ export default function Dashboard() {
                 </PieChart>
               </ResponsiveContainer>
               {safeStats.labelDistribution.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm">
+                <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm pointer-events-none">
                   No label data available
                 </div>
               )}
