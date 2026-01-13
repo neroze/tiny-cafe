@@ -37,6 +37,17 @@ export const stock = pgTable("stock", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const expenses = pgTable("expenses", {
+  id: serial("id").primaryKey(),
+  date: timestamp("date").defaultNow().notNull(),
+  category: text("category").notNull(), // Rent, Salary, Utilities, Supplies, Maintenance, Misc
+  description: text("description").default(""),
+  amount: integer("amount").notNull(), // in cents/paisa
+  isRecurring: boolean("is_recurring").default(false),
+  frequency: text("frequency").default("daily"), // daily | monthly | yearly
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const itemsRelations = relations(items, ({ many }) => ({
   sales: many(sales),
   stock: many(stock),
@@ -66,6 +77,9 @@ export const insertSaleSchema = createInsertSchema(sales, {
 export const insertStockSchema = createInsertSchema(stock, {
   date: z.coerce.date(),
 }).omit({ id: true, createdAt: true });
+export const insertExpenseSchema = createInsertSchema(expenses, {
+  date: z.coerce.date(),
+}).omit({ id: true, createdAt: true });
 
 // Types
 export type Item = typeof items.$inferSelect;
@@ -74,6 +88,8 @@ export type Sale = typeof sales.$inferSelect;
 export type InsertSale = z.infer<typeof insertSaleSchema>;
 export type Stock = typeof stock.$inferSelect;
 export type InsertStock = z.infer<typeof insertStockSchema>;
+export type Expense = typeof expenses.$inferSelect;
+export type InsertExpense = z.infer<typeof insertExpenseSchema>;
 
 export type CreateSaleRequest = InsertSale;
 export type CreateStockTransactionRequest = {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertItemSchema, insertSaleSchema, items, sales, stock } from './schema';
+import { insertItemSchema, insertSaleSchema, items, sales, stock, expenses, insertExpenseSchema } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -106,6 +106,58 @@ export const api = {
       },
     },
   },
+  expenses: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/expenses',
+      input: z.object({
+        from: z.string().optional(),
+        to: z.string().optional(),
+      }).optional(),
+      responses: {
+        200: z.object({
+          total: z.number(),
+          byCategory: z.record(z.string(), z.number()),
+          items: z.array(z.object({
+            id: z.number(),
+            date: z.string(),
+            category: z.string(),
+            description: z.string(),
+            amount: z.number(),
+            isRecurring: z.boolean(),
+            frequency: z.enum(['daily', 'monthly', 'yearly']),
+            allocatedDaily: z.number().optional(),
+          })),
+        }),
+      },
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/expenses',
+      input: insertExpenseSchema,
+      responses: {
+        201: z.custom<typeof expenses.$inferSelect>(),
+        400: z.object({ message: z.string() }),
+      },
+    },
+    update: {
+      method: 'PUT' as const,
+      path: '/api/expenses/:id',
+      input: insertExpenseSchema.partial(),
+      responses: {
+        200: z.custom<typeof expenses.$inferSelect>(),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/expenses/:id',
+      responses: {
+        204: z.void(),
+        404: z.object({ message: z.string() }),
+      },
+    },
+  },
   dashboard: {
     stats: {
       method: 'GET' as const,
@@ -174,6 +226,31 @@ export const api = {
       path: '/api/sales/labels',
       responses: {
         200: z.array(z.string()),
+      },
+    },
+    profit: {
+      method: 'GET' as const,
+      path: '/api/dashboard/profit',
+      input: z.object({
+        range: z.enum(['daily','weekly','monthly','quarterly','yearly']).optional(),
+      }).optional(),
+      responses: {
+        200: z.object({
+          totalSales: z.number(),
+          totalCOGS: z.number(),
+          grossProfit: z.number(),
+          totalExpenses: z.number(),
+          netProfit: z.number(),
+          netMarginPct: z.number(),
+          trend: z.array(z.object({
+            date: z.string(),
+            net: z.number(),
+          })),
+          alerts: z.object({
+            consecutiveNetLossDays: z.number(),
+            expenseSpike: z.boolean(),
+          }),
+        }),
       },
     },
   },

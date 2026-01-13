@@ -1,5 +1,6 @@
 import * as React from "react";
 import { useDashboardStats } from "@/hooks/use-dashboard";
+import { useProfit } from "@/hooks/use-profit";
 import { Layout } from "@/components/layout";
 import { StatsCard } from "@/components/stats-card";
 import { DollarSign, Calendar as CalendarIcon, TrendingUp, Award, ArrowUpRight, Download, Settings as SettingsIcon, X } from "lucide-react";
@@ -29,6 +30,7 @@ export default function Dashboard() {
     to: new Date()
   });
   const { data: stats, isLoading } = useDashboardStats(range);
+  const { data: profit } = useProfit(range);
 
   const { data: targets } = useQuery({
     queryKey: [api.dashboard.get_targets.path],
@@ -398,6 +400,34 @@ export default function Dashboard() {
         />
       </div>
 
+      {profit && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <StatsCard
+            title="Total Expenses"
+            value={formatCurrency(profit.totalExpenses)}
+            icon={DollarSign}
+            colorClass="text-red-500"
+          />
+          <StatsCard
+            title="Gross Profit"
+            value={formatCurrency(profit.grossProfit)}
+            icon={TrendingUp}
+          />
+          <StatsCard
+            title="Net Profit"
+            value={formatCurrency(profit.netProfit)}
+            icon={Award}
+            colorClass={profit.netProfit >= 0 ? "text-green-600" : "text-red-600"}
+          />
+          <StatsCard
+            title="Net Margin"
+            value={`${profit.netMarginPct.toFixed(1)}%`}
+            icon={TrendingUp}
+            colorClass="text-purple-500"
+          />
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-8 mb-8">
         <Card className="w-full">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
@@ -462,6 +492,27 @@ export default function Dashboard() {
           </div>
         </Card>
       </div>
+
+      {profit && (
+        <div className="grid grid-cols-1 gap-8 mb-8">
+          <Card className="w-full">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold font-display">Net Profit Trend</h2>
+            </div>
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={profit.trend.map(t => ({ date: new Date(t.date).toLocaleDateString(), net: t.net / 100 }))}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis dataKey="date" axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={(val) => `NPR ${val}`} axisLine={false} tickLine={false} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="net" stroke="#10b981" strokeWidth={3} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1">

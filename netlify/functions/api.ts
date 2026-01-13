@@ -49,6 +49,65 @@ export const handler: Handler = async (event) => {
     const body = parseBody(event);
     const path = normalizePath(event.path);
 
+    if (method === "GET" && path === api.expenses.list.path) {
+      const from = qp.from ? new Date(qp.from) : undefined;
+      const to = qp.to ? new Date(qp.to) : undefined;
+      const data = await storage.getExpenses(from, to);
+      return json(200, {
+        total: data.total,
+        byCategory: data.byCategory,
+        items: data.items.map((e: any) => ({
+          id: e.id,
+          date: (e.date as Date).toISOString(),
+          category: e.category,
+          description: e.description || "",
+          amount: e.amount,
+          isRecurring: e.isRecurring || false,
+          frequency: e.frequency || "daily",
+          allocatedDaily: e.allocatedDaily,
+        })),
+      });
+    }
+
+    if (method === "POST" && path === api.expenses.create.path) {
+      try {
+        const input = api.expenses.create.input.parse({
+          ...body,
+          amount: Number(body.amount),
+          isRecurring: Boolean(body.isRecurring),
+        });
+        const exp = await storage.createExpense(input);
+        return json(201, exp);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          return json(400, { message: err.message });
+        }
+        throw err;
+      }
+    }
+
+    if (method === "PUT" && path.startsWith("/api/expenses/")) {
+      try {
+        const idStr = path.split("/").pop();
+        const id = Number(idStr);
+        const input = api.expenses.update.input.parse(body);
+        const exp = await storage.updateExpense(id, input);
+        return json(200, exp);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          return json(400, { message: err.message });
+        }
+        return json(404, { message: "Expense not found" });
+      }
+    }
+
+    if (method === "DELETE" && path.startsWith("/api/expenses/")) {
+      const idStr = path.split("/").pop();
+      const id = Number(idStr);
+      await storage.deleteExpense(id);
+      return { statusCode: 204, body: "" };
+    }
+
     if (method === "GET" && path === api.items.list.path) {
       const items = await storage.getItems();
       return json(200, items);
@@ -169,6 +228,12 @@ export const handler: Handler = async (event) => {
     if (method === "GET" && path === api.dashboard.stats.path) {
       const range = (qp.range as any) || undefined;
       const stats = await storage.getDashboardStats(range);
+      return json(200, stats);
+    }
+
+    if (method === "GET" && path === api.dashboard.profit.path) {
+      const range = (qp.range as any) || undefined;
+      const stats = await storage.getProfit(range);
       return json(200, stats);
     }
 
@@ -314,4 +379,3 @@ export const handler: Handler = async (event) => {
     return json(500, { message: err?.message || "Internal Server Error" });
   }
 };
-

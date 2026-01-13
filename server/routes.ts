@@ -50,6 +50,58 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
+  // Expenses
+  app.get(api.expenses.list.path, async (req, res) => {
+    const from = req.query.from ? new Date(req.query.from as string) : undefined;
+    const to = req.query.to ? new Date(req.query.to as string) : undefined;
+    const data = await storage.getExpenses(from, to);
+    res.json({
+      total: data.total,
+      byCategory: data.byCategory,
+      items: data.items.map(e => ({
+        id: (e as any).id,
+        date: (e.date as Date).toISOString(),
+        category: e.category,
+        description: e.description || "",
+        amount: e.amount,
+        isRecurring: e.isRecurring || false,
+        frequency: (e.frequency as any) || "daily",
+        allocatedDaily: (e as any).allocatedDaily,
+      })),
+    });
+  });
+
+  app.post(api.expenses.create.path, async (req, res) => {
+    try {
+      const input = api.expenses.create.input.parse({
+        ...req.body,
+        amount: Number(req.body.amount),
+        isRecurring: Boolean(req.body.isRecurring),
+      });
+      const exp = await storage.createExpense(input);
+      res.status(201).json(exp);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.put(api.expenses.update.path, async (req, res) => {
+    try {
+      const input = api.expenses.update.input.parse(req.body);
+      const exp = await storage.updateExpense(Number(req.params.id), input);
+      res.json(exp);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      res.status(404).json({ message: "Expense not found" });
+    }
+  });
+
+  app.delete(api.expenses.delete.path, async (req, res) => {
+    await storage.deleteExpense(Number(req.params.id));
+    res.status(204).send();
+  });
+
   // Sales
   app.get(api.sales.list.path, async (req, res) => {
     const date = req.query.date ? new Date(req.query.date as string) : undefined;
@@ -127,6 +179,11 @@ export async function registerRoutes(
   // Dashboard
   app.get(api.dashboard.stats.path, async (req, res) => {
     const stats = await storage.getDashboardStats(req.query.range as any);
+    res.json(stats);
+  });
+
+  app.get(api.dashboard.profit.path, async (req, res) => {
+    const stats = await storage.getProfit(req.query.range as any);
     res.json(stats);
   });
 

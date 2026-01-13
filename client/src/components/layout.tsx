@@ -12,6 +12,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { href: "/sales", label: "Sales Entry", icon: Receipt },
     { href: "/menu", label: "Menu Items", icon: Coffee },
     { href: "/stock", label: "Inventory", icon: Package },
+    { href: "/expenses", label: "Expenses", icon: Receipt },
   ];
 
   return (
