@@ -6,7 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { useExpenses, useCreateExpense, useUpdateExpense, useDeleteExpense } from "@/hooks/use-expenses";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { format } from "date-fns";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Badge } from "@/components/ui/badge";
+import { Settings as SettingsIcon, X } from "lucide-react";
 
 export default function ExpensesPage() {
   const [from, setFrom] = React.useState<string>(new Date().toISOString().split("T")[0]);
@@ -15,6 +20,33 @@ export default function ExpensesPage() {
   const createExpense = useCreateExpense();
   const updateExpense = useUpdateExpense();
   const deleteExpense = useDeleteExpense();
+  const { data: expenseCategories } = useQuery<string[]>({
+    queryKey: ["/api/config/expense-categories"],
+    queryFn: async () => {
+      const res = await fetch("/api/config/expense-categories", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load expense categories");
+      return await res.json();
+    },
+    initialData: ["Rent","Salary","Utilities","Supplies","Maintenance","Misc"],
+  });
+  const [newExpenseCategory, setNewExpenseCategory] = React.useState("");
+  const addExpenseCategoryMutation = useMutation({
+    mutationFn: async (category: string) => {
+      await apiRequest("POST", "/api/config/expense-categories", { category });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/config/expense-categories"] });
+      setNewExpenseCategory("");
+    }
+  });
+  const deleteExpenseCategoryMutation = useMutation({
+    mutationFn: async (category: string) => {
+      await apiRequest("DELETE", "/api/config/expense-categories", { category });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/config/expense-categories"] });
+    }
+  });
 
   const [form, setForm] = React.useState({
     date: new Date(),
@@ -45,16 +77,65 @@ export default function ExpensesPage() {
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right text-sm">Category</Label>
-                <Select value={form.category} onValueChange={(v: any) => setForm({ ...form, category: v })}>
-                  <SelectTrigger className="col-span-3">
-                    <SelectValue placeholder="Category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["Rent","Salary","Utilities","Supplies","Maintenance","Misc"].map(c => (
-                      <SelectItem key={c} value={c}>{c}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="col-span-3 flex items-center gap-2">
+                  <Select value={form.category} onValueChange={(v: any) => setForm({ ...form, category: v })}>
+                    <SelectTrigger className="h-11 rounded-xl bg-card border border-border px-4 text-foreground flex-1">
+                      <SelectValue placeholder="Category" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card text-foreground border border-border">
+                      {expenseCategories.map((c: string) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="icon" title="Configure Expense Categories">
+                        <SettingsIcon className="w-4 h-4 rotate-45" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[360px] p-4 bg-background text-foreground border border-border shadow-md rounded-xl" align="end">
+                      <div className="space-y-4">
+                        <div className="flex gap-2">
+                          <Input 
+                            placeholder="New expense category..." 
+                            value={newExpenseCategory}
+                            onChange={(e) => setNewExpenseCategory(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && newExpenseCategory.trim()) {
+                                addExpenseCategoryMutation.mutate(newExpenseCategory.trim());
+                              }
+                            }}
+                          />
+                          <Button 
+                            size="sm" 
+                            onClick={() => newExpenseCategory.trim() && addExpenseCategoryMutation.mutate(newExpenseCategory.trim())}
+                            disabled={addExpenseCategoryMutation.isPending}
+                          >
+                            Add
+                          </Button>
+                        </div>
+                        <div className="flex flex-wrap gap-2 max-h-44 overflow-y-auto p-1">
+                          {expenseCategories.map((cat: string) => (
+                            <Badge key={cat} variant="secondary" className="gap-1 px-2 py-1">
+                              {cat}
+                              <button 
+                                className="hover:text-destructive"
+                                onClick={() => deleteExpenseCategoryMutation.mutate(cat)}
+                                aria-label={`Remove ${cat}`}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </Badge>
+                          ))}
+                          {expenseCategories.length === 0 && (
+                            <p className="text-sm text-muted-foreground w-full text-center py-2">No expense categories yet.</p>
+                          )}
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label className="text-right text-sm">Description</Label>
@@ -117,6 +198,7 @@ export default function ExpensesPage() {
               <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
               <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
             </div>
+            
             <div className="mb-4 text-sm text-muted-foreground">
               Total: {formatCurrency(data?.total || 0)}
             </div>
@@ -157,4 +239,3 @@ export default function ExpensesPage() {
     </Layout>
   );
 }
-
