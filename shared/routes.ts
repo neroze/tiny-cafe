@@ -63,7 +63,9 @@ export const api = {
       method: 'GET' as const,
       path: '/api/sales',
       input: z.object({
-        date: z.string().optional(), // Filter by date
+        date: z.string().optional(), // Filter by single date
+        from: z.string().optional(), // Filter by range start
+        to: z.string().optional(),   // Filter by range end
         limit: z.string().optional(),
       }).optional(),
       responses: {

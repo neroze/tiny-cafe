@@ -4,7 +4,7 @@ import { PageHeader, Button, Input, Select, Card } from "@/components/ui-compone
 import { useItems } from "@/hooks/use-items";
 import { useCreateSale, useSales } from "@/hooks/use-sales";
 import { useToast } from "@/hooks/use-toast";
-import { format } from "date-fns";
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { Plus, Coffee, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "@tanstack/react-query";
@@ -100,6 +100,37 @@ export default function SalesEntry() {
         title="Sales Entry" 
         description="Record daily transactions quickly."
       />
+
+      {/* Summary widgets */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
+        {(() => {
+          const todayStr = format(new Date(), "yyyy-MM-dd");
+          const weekFromStr = format(startOfWeek(new Date()), "yyyy-MM-dd");
+          const weekToStr = format(endOfWeek(new Date()), "yyyy-MM-dd");
+          const monthFromStr = format(startOfMonth(new Date()), "yyyy-MM-dd");
+          const monthToStr = format(endOfMonth(new Date()), "yyyy-MM-dd");
+          const { data: todayRange = [] } = useSales({ from: todayStr, to: todayStr, limit: "500" });
+          const { data: weekRange = [] } = useSales({ from: weekFromStr, to: weekToStr, limit: "2000" });
+          const { data: monthRange = [] } = useSales({ from: monthFromStr, to: monthToStr, limit: "5000" });
+          const sum = (rows: any[]) => rows.reduce((s, r) => s + Number(r.total || 0), 0);
+          return (
+            <>
+              <div className="rounded-xl border border-border bg-card p-4">
+                <div className="text-sm text-muted-foreground">Today</div>
+                <div className="text-2xl font-display">NPR {(sum(todayRange) / 100).toLocaleString()}</div>
+              </div>
+              <div className="rounded-xl border border-border bg-card p-4">
+                <div className="text-sm text-muted-foreground">This Week</div>
+                <div className="text-2xl font-display">NPR {(sum(weekRange) / 100).toLocaleString()}</div>
+              </div>
+              <div className="rounded-xl border border-border bg-card p-4">
+                <div className="text-sm text-muted-foreground">This Month</div>
+                <div className="text-2xl font-display">NPR {(sum(monthRange) / 100).toLocaleString()}</div>
+              </div>
+            </>
+          );
+        })()}
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Entry Form */}
@@ -249,6 +280,85 @@ export default function SalesEntry() {
             <h2 className="text-xl font-bold font-display mb-6 flex items-center gap-2">
               <Coffee className="w-5 h-5 text-primary" /> Today's Transactions
             </h2>
+
+            {/* Range filters and pagination */}
+            <div className="flex flex-wrap gap-2 mb-4 px-4">
+              {(() => {
+                const todayStr = format(new Date(), "yyyy-MM-dd");
+                const [from, setFrom] = useState<string>(todayStr);
+                const [to, setTo] = useState<string>(todayStr);
+                const [page, setPage] = useState(1);
+                const [pageSize, setPageSize] = useState(10);
+                const { data: rangeSales = [] } = useSales({ from, to, limit: "5000" });
+                const pageCount = Math.max(1, Math.ceil(rangeSales.length / pageSize));
+                const startIndex = (page - 1) * pageSize;
+                const visible = rangeSales.slice(startIndex, startIndex + pageSize);
+                return (
+                  <>
+                    <Input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} />
+                    <Input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }} />
+                    <Select value={String(pageSize)} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}>
+                      <option value="10">10 / page</option>
+                      <option value="20">20 / page</option>
+                      <option value="50">50 / page</option>
+                    </Select>
+                    <div className="ml-auto flex items-center gap-2">
+                      <Button variant="outline" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>Prev</Button>
+                      <span className="text-sm text-muted-foreground">Page {page} of {pageCount}</span>
+                      <Button variant="outline" onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page >= pageCount}>Next</Button>
+                    </div>
+                    <div className="overflow-hidden w-full">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="border-b border-border text-left">
+                            <th className="pb-3 text-sm font-medium text-muted-foreground pl-4">Time</th>
+                            <th className="pb-3 text-sm font-medium text-muted-foreground">Item</th>
+                            <th className="pb-3 text-sm font-medium text-muted-foreground text-center">Qty</th>
+                            <th className="pb-3 text-sm font-medium text-muted-foreground text-right pr-4">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {visible.map((sale: any) => (
+                            <tr key={sale.id} className="group hover:bg-muted/50 transition-colors">
+                              <td className="py-3 text-sm text-muted-foreground pl-4">
+                                {format(new Date(sale.date || sale.createdAt || new Date()), "LLL dd, y hh:mm a")}
+                              </td>
+                              <td className="py-3 font-medium text-foreground">
+                                <div>{sale.item?.name}</div>
+                                {sale.labels && sale.labels.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {sale.labels.map((label: string, i: number) => (
+                                      <Badge key={i} variant="outline" className="text-[10px] px-1 py-0 h-4 uppercase">
+                                        {label}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-3 text-center text-muted-foreground">
+                                <span className="inline-flex items-center justify-center bg-secondary w-8 h-8 rounded-full text-xs font-bold">
+                                  {sale.quantity}
+                                </span>
+                              </td>
+                              <td className="py-3 text-right font-bold text-primary pr-4">
+                                NPR {(sale.total / 100).toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                          {visible.length === 0 && (
+                            <tr>
+                              <td colSpan={4} className="py-12 text-center text-muted-foreground">
+                                No sales recorded for this range.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
 
             <div className="overflow-hidden">
               <table className="w-full">

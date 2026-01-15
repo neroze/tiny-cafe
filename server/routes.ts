@@ -89,10 +89,18 @@ export async function registerRoutes(
 
   // Sales
   app.get(api.sales.list.path, async (req, res) => {
-    const date = req.query.date ? new Date(req.query.date as string) : undefined;
     const limit = req.query.limit ? Number(req.query.limit) : 50;
-    const sales = await listSales(date, limit);
-    res.json(sales);
+    const hasRange = req.query.from || req.query.to;
+    if (hasRange) {
+      const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : undefined;
+      const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : undefined;
+      const sales = await (await import("./services/salesService")).listSalesRange(from, to, limit);
+      return res.json(sales);
+    } else {
+      const date = req.query.date ? new Date(`${req.query.date as string}T00:00:00`) : undefined;
+      const sales = await listSales(date, limit);
+      return res.json(sales);
+    }
   });
 
   app.post(api.sales.create.path, async (req, res) => {

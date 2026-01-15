@@ -5,6 +5,10 @@ export async function listSales(date?: Date, limit: number = 50) {
   return await storage.getSales(date, limit);
 }
 
+export async function listSalesRange(from?: Date, to?: Date, limit: number = 100) {
+  return await storage.getSalesRange(from, to, limit);
+}
+
 export async function createSaleFromBody(body: any) {
   const raw = { ...body };
   const itemId = Number(raw.itemId);
@@ -29,4 +33,3 @@ export async function createSaleFromBody(body: any) {
   });
   return await storage.createSale(input);
 }
-

@@ -126,6 +126,27 @@ export class DatabaseStorage implements IStorage {
     return await query.orderBy(desc(sales.date)).limit(limit) as any;
   }
 
+  async getSalesRange(from?: Date, to?: Date, limit: number = 500): Promise<(Sale & { item: Item })[]> {
+    const start = from ? startOfDay(from) : startOfMonth(new Date());
+    const end = to ? endOfDay(to) : endOfDay(new Date());
+    return await db.select({
+      id: sales.id,
+      date: sales.date,
+      itemId: sales.itemId,
+      quantity: sales.quantity,
+      unitPrice: sales.unitPrice,
+      total: sales.total,
+      labels: sales.labels,
+      createdAt: sales.createdAt,
+      item: items
+    })
+    .from(sales)
+    .innerJoin(items, eq(sales.itemId, items.id))
+    .where(and(gte(sales.date, start), lte(sales.date, end)))
+    .orderBy(desc(sales.date))
+    .limit(limit) as any;
+  }
+
   async createSale(insertSale: InsertSale): Promise<Sale> {
     const [sale] = await db.insert(sales).values(insertSale).returning();
     await this.updateDailyStockSales(sale.itemId, sale.date, sale.quantity);

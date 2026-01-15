@@ -141,10 +141,17 @@ export const handler: Handler = async (event) => {
     }
 
     if (method === "GET" && path === api.sales.list.path) {
-      const date = qp.date ? new Date(qp.date) : undefined;
       const limit = qp.limit ? Number(qp.limit) : 50;
-      const sales = await listSales(date, limit);
-      return json(200, sales);
+      if (qp.from || qp.to) {
+        const from = qp.from ? new Date(`${qp.from}T00:00:00`) : undefined;
+        const to = qp.to ? new Date(`${qp.to}T00:00:00`) : undefined;
+        const sales = await (await import("../../server/services/salesService")).listSalesRange(from, to, limit);
+        return json(200, sales);
+      } else {
+        const date = qp.date ? new Date(`${qp.date}T00:00:00`) : undefined;
+        const sales = await listSales(date, limit);
+        return json(200, sales);
+      }
     }
 
     if (method === "POST" && path === api.sales.create.path) {

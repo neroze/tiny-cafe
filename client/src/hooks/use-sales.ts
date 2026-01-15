@@ -1,12 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type InsertSale } from "@shared/routes";
+import { api } from "@shared/routes";
 
-export function useSales(params?: { date?: string; limit?: string }) {
+export function useSales(params?: { date?: string; from?: string; to?: string; limit?: string }) {
   return useQuery({
     queryKey: [api.sales.list.path, params],
     queryFn: async () => {
       const searchParams = new URLSearchParams();
       if (params?.date) searchParams.set("date", params.date);
+      if (params?.from) searchParams.set("from", params.from);
+      if (params?.to) searchParams.set("to", params.to);
       if (params?.limit) searchParams.set("limit", params.limit);
       
       const url = `${api.sales.list.path}?${searchParams.toString()}`;
