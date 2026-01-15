@@ -8,15 +8,25 @@ import { Button } from "@/components/ui/button";
 import { useExpenses, useCreateExpense, useUpdateExpense, useDeleteExpense } from "@/hooks/use-expenses";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { format } from "date-fns";
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
 import { Settings as SettingsIcon, X } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Pencil } from "lucide-react";
 
 export default function ExpensesPage() {
-  const [from, setFrom] = React.useState<string>(new Date().toISOString().split("T")[0]);
-  const [to, setTo] = React.useState<string>(new Date().toISOString().split("T")[0]);
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const [from, setFrom] = React.useState<string>(todayStr);
+  const [to, setTo] = React.useState<string>(todayStr);
   const { data } = useExpenses({ from, to });
+  const weekFromStr = format(startOfWeek(new Date()), "yyyy-MM-dd");
+  const weekToStr = format(endOfWeek(new Date()), "yyyy-MM-dd");
+  const monthFromStr = format(startOfMonth(new Date()), "yyyy-MM-dd");
+  const monthToStr = format(endOfMonth(new Date()), "yyyy-MM-dd");
+  const { data: todayAgg } = useExpenses({ from: todayStr, to: todayStr });
+  const { data: weekAgg } = useExpenses({ from: weekFromStr, to: weekToStr });
+  const { data: monthAgg } = useExpenses({ from: monthFromStr, to: monthToStr });
   const createExpense = useCreateExpense();
   const updateExpense = useUpdateExpense();
   const deleteExpense = useDeleteExpense();
@@ -59,9 +69,73 @@ export default function ExpensesPage() {
 
   const formatCurrency = (val: number) => `NPR ${(val / 100).toLocaleString()}`;
 
+  const [search, setSearch] = React.useState("");
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(10);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [from, to, search, pageSize]);
+
+  const allItems = (data?.items || []) as any[];
+  const filteredItems = allItems.filter((e: any) =>
+    (e.description || "").toLowerCase().includes(search.toLowerCase())
+  );
+  const pageCount = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const startIndex = (page - 1) * pageSize;
+  const visibleItems = filteredItems.slice(startIndex, startIndex + pageSize);
+
+  const [editingExpense, setEditingExpense] = React.useState<any | null>(null);
+  const [editingForm, setEditingForm] = React.useState({
+    category: "",
+    description: "",
+    amount: 0,
+    isRecurring: false as boolean,
+    frequency: "daily" as "daily" | "monthly" | "yearly",
+  });
+
+  const openEdit = (e: any) => {
+    setEditingExpense(e);
+    setEditingForm({
+      category: e.category,
+      description: e.description || "",
+      amount: e.allocatedDaily ? e.allocatedDaily : e.amount,
+      isRecurring: Boolean(e.isRecurring),
+      frequency: (e.frequency as any) || "daily",
+    });
+  };
+
+  const saveEdit = () => {
+    if (!editingExpense) return;
+    updateExpense.mutate({
+      id: editingExpense.id,
+      category: editingForm.category,
+      description: editingForm.description,
+      amount: Number(editingForm.amount),
+      isRecurring: Boolean(editingForm.isRecurring),
+      frequency: editingForm.frequency,
+    } as any, {
+      onSuccess: () => setEditingExpense(null),
+    });
+  };
+
   return (
     <Layout>
       <div className="flex flex-col gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-sm text-muted-foreground">Today</div>
+            <div className="text-2xl font-display">{formatCurrency(todayAgg?.total || 0)}</div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-sm text-muted-foreground">This Week</div>
+            <div className="text-2xl font-display">{formatCurrency(weekAgg?.total || 0)}</div>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="text-sm text-muted-foreground">This Month</div>
+            <div className="text-2xl font-display">{formatCurrency(monthAgg?.total || 0)}</div>
+          </div>
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <Card className="p-6">
             <h2 className="text-xl font-bold font-display mb-4">Add Expense</h2>
@@ -194,9 +268,25 @@ export default function ExpensesPage() {
 
           <Card className="p-6">
             <h2 className="text-xl font-bold font-display mb-4">Expenses</h2>
-            <div className="flex gap-2 mb-4">
+            <div className="flex flex-wrap gap-2 mb-4">
               <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
               <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+              <Input
+                placeholder="Search description..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="min-w-[220px]"
+              />
+              <Select value={String(pageSize)} onValueChange={(v: any) => setPageSize(Number(v))}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue placeholder="Page size" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10 / page</SelectItem>
+                  <SelectItem value="20">20 / page</SelectItem>
+                  <SelectItem value="50">50 / page</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             
             <div className="mb-4 text-sm text-muted-foreground">
@@ -213,17 +303,28 @@ export default function ExpensesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {(data?.items || []).map((e: any) => (
+                  {visibleItems.map((e: any) => (
                     <tr key={e.id} className="hover:bg-secondary/20">
                       <td className="py-3">{format(new Date(e.date), "LLL dd, y")}</td>
                       <td className="py-3">{e.category}</td>
                       <td className="py-3">{e.description}</td>
                       <td className="py-3 text-right font-mono">
-                        {formatCurrency(e.allocatedDaily ? e.allocatedDaily : e.amount)}
+                        <div className="flex items-center justify-end gap-2">
+                          {formatCurrency(e.allocatedDaily ? e.allocatedDaily : e.amount)}
+                          {(() => {
+                            const entryDay = format(new Date(e.date), "yyyy-MM-dd");
+                            const canEdit = entryDay === from;
+                            return canEdit ? (
+                              <Button variant="ghost" size="icon" title="Edit expense" onClick={() => openEdit(e)}>
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            ) : null;
+                          })()}
+                        </div>
                       </td>
                     </tr>
                   ))}
-                  {(data?.items || []).length === 0 && (
+                  {visibleItems.length === 0 && (
                     <tr>
                       <td colSpan={4} className="py-8 text-center text-muted-foreground">
                         No expenses for selected range.
@@ -233,6 +334,79 @@ export default function ExpensesPage() {
                 </tbody>
               </table>
             </div>
+            <div className="flex items-center justify-between mt-4">
+              <div className="text-sm text-muted-foreground">
+                Showing {visibleItems.length} of {filteredItems.length} expenses
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                >
+                  Prev
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Page {page} of {pageCount}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage(p => Math.min(pageCount, p + 1))}
+                  disabled={page >= pageCount}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+            <Dialog open={!!editingExpense} onOpenChange={(v) => !v && setEditingExpense(null)}>
+              <DialogContent className="bg-background sm:max-w-[480px]">
+                <DialogHeader>
+                  <DialogTitle className="font-display text-2xl">Edit Expense</DialogTitle>
+                </DialogHeader>
+                <div className="grid gap-4 mt-2">
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right text-sm">Category</Label>
+                    <div className="col-span-3">
+                      <Select value={editingForm.category} onValueChange={(v: any) => setEditingForm({ ...editingForm, category: v })}>
+                        <SelectTrigger className="h-11 rounded-xl bg-card border border-border px-4 text-foreground">
+                          <SelectValue placeholder="Category" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-card text-foreground border border-border">
+                          {expenseCategories.map((c: string) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right text-sm">Description</Label>
+                    <Input
+                      value={editingForm.description}
+                      onChange={(e) => setEditingForm({ ...editingForm, description: e.target.value })}
+                      className="col-span-3"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label className="text-right text-sm">Amount (NPR)</Label>
+                    <Input
+                      type="number"
+                      value={(editingForm.amount / 100).toString()}
+                      onChange={(e) =>
+                        setEditingForm({ ...editingForm, amount: Math.round(Number(e.target.value) * 100) })
+                      }
+                      className="col-span-3"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setEditingExpense(null)}>Cancel</Button>
+                  <Button onClick={saveEdit} disabled={updateExpense.isPending}>Save</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </Card>
         </div>
       </div>

@@ -56,8 +56,8 @@ export async function registerRoutes(
 
   // Expenses
   app.get(api.expenses.list.path, async (req, res) => {
-    const from = req.query.from ? new Date(req.query.from as string) : undefined;
-    const to = req.query.to ? new Date(req.query.to as string) : undefined;
+    const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : undefined;
+    const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : undefined;
     const result = await listExpenses(from, to);
     res.json(result);
   });
@@ -140,8 +140,8 @@ export async function registerRoutes(
 
   app.get(api.dashboard.export.path, async (req, res) => {
     try {
-      const from = req.query.from ? new Date(req.query.from as string) : new Date();
-      const to = req.query.to ? new Date(req.query.to as string) : new Date();
+      const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : new Date();
+      const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : new Date();
       const { filename, content } = await getExportCSV(from, to);
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", `attachment; filename=${filename}`);

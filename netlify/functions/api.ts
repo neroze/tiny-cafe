@@ -55,8 +55,8 @@ export const handler: Handler = async (event) => {
     const path = normalizePath(event.path);
 
     if (method === "GET" && path === api.expenses.list.path) {
-      const from = qp.from ? new Date(qp.from) : undefined;
-      const to = qp.to ? new Date(qp.to) : undefined;
+      const from = qp.from ? new Date(`${qp.from}T00:00:00`) : undefined;
+      const to = qp.to ? new Date(`${qp.to}T00:00:00`) : undefined;
       const result = await listExpenses(from, to);
       return json(200, result);
     }
@@ -195,8 +195,8 @@ export const handler: Handler = async (event) => {
 
     if (method === "GET" && path === api.dashboard.export.path) {
       try {
-        const from = qp.from ? new Date(qp.from) : new Date();
-        const to = qp.to ? new Date(qp.to) : new Date();
+        const from = qp.from ? new Date(`${qp.from}T00:00:00`) : new Date();
+        const to = qp.to ? new Date(`${qp.to}T00:00:00`) : new Date();
         const { filename, content } = await getExportCSV(from, to);
         return csv(200, filename, content);
       } catch {

@@ -4,12 +4,15 @@ import { z } from "zod";
 
 export async function listExpenses(from?: Date, to?: Date) {
   const data = await storage.getExpenses(from, to);
+
+  console.log('=========')
+  console.log(data);
   return {
     total: data.total,
     byCategory: data.byCategory,
     items: data.items.map(e => ({
       id: (e as any).id,
-      date: (e.date as Date).toISOString(),
+      date: ((e.isRecurring && from) ? from : (e.date as Date)).toISOString(),
       category: e.category,
       description: e.description || "",
       amount: e.amount,
@@ -61,4 +64,3 @@ export async function removeExpenseCategory(category: string) {
   await storage.setSetting("configured_expense_categories", JSON.stringify(cats));
   return cats;
 }
-

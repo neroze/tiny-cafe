@@ -441,27 +441,35 @@ export class DatabaseStorage implements IStorage {
     const start = from ? startOfDay(from) : startOfMonth(new Date());
     const end = to ? endOfDay(to) : endOfDay(new Date());
 
-    const rows = await db.select().from(expenses);
+    const oneTimeRows = await db
+      .select()
+      .from(expenses)
+      .where(and(eq(expenses.isRecurring, false), and(gte(expenses.date, start), lte(expenses.date, end))));
+
+    const recurringRows = await db
+      .select()
+      .from(expenses)
+      .where(eq(expenses.isRecurring, true));
+
     const items: (Expense & { allocatedDaily?: number })[] = [];
     let total = 0;
     const byCategory: Record<string, number> = {};
 
-    for (const exp of rows) {
-      if (exp.isRecurring) {
-        // allocate across each day in range
+    for (const exp of oneTimeRows) {
+      total += exp.amount;
+      byCategory[exp.category] = (byCategory[exp.category] || 0) + exp.amount;
+      items.push(exp);
+    }
+
+    for (const exp of recurringRows) {
+      if (exp.date <= end) {
         const days = this.daysBetweenInclusive(start, end);
         const daily = this.dailyAllocationFor(exp, start);
         const allocated = daily * days;
         total += allocated;
         byCategory[exp.category] = (byCategory[exp.category] || 0) + allocated;
-        items.push({ ...exp, allocatedDaily: daily });
-      } else {
-        // include if within range
-        const inRange = exp.date >= start && exp.date <= end;
-        if (inRange) {
-          total += exp.amount;
-          byCategory[exp.category] = (byCategory[exp.category] || 0) + exp.amount;
-          items.push(exp);
+        if (exp.date >= start && exp.date <= end) {
+          items.push({ ...exp, allocatedDaily: daily });
         }
       }
     }
