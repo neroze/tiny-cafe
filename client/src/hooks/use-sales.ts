@@ -56,3 +56,26 @@ export function useCreateSale() {
     },
   });
 }
+
+export function useUpdateSale() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...updates }: { id: number } & Partial<any>) => {
+      const res = await fetch(api.sales.update.path.replace(":id", String(id)), {
+        method: api.sales.update.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        if (res.status === 400) throw new Error((await res.json())?.message || "Validation error");
+        throw new Error("Failed to update sale");
+      }
+      return api.sales.update.responses[200].parse(await res.json());
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.sales.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.stock.list.path] });
+    },
+  });
+}

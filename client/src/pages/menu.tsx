@@ -6,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Edit2, Trash2, X, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useQuery } from "@tanstack/react-query";
-import type { InsertItem } from "@shared/routes";
+import type { InsertItem } from "@shared/schema";
 
 export default function MenuItems() {
   const { data: items = [], isLoading } = useItems();
@@ -25,12 +25,7 @@ export default function MenuItems() {
   };
 
   const openEdit = (item: any) => {
-    // Convert cents to standard units for editing
-    setEditingItem({
-      ...item,
-      costPrice: item.costPrice / 100,
-      sellingPrice: item.sellingPrice / 100,
-    });
+    setEditingItem(item);
     setIsDialogOpen(true);
   };
 
@@ -111,11 +106,11 @@ function ItemCard({ item, onEdit }: { item: any, onEdit: () => void }) {
       <div className="flex items-end gap-2 mt-4">
         <div>
           <p className="text-xs text-muted-foreground uppercase">Price</p>
-          <p className="text-2xl font-bold text-primary">NPR {(item.sellingPrice / 100).toLocaleString()}</p>
+          <p className="text-2xl font-bold text-primary">NPR {Number(item.sellingPrice).toLocaleString()}</p>
         </div>
         <div className="ml-auto text-right">
           <p className="text-xs text-muted-foreground uppercase">Cost</p>
-          <p className="text-sm font-medium text-muted-foreground">NPR {(item.costPrice / 100).toLocaleString()}</p>
+          <p className="text-sm font-medium text-muted-foreground">NPR {Number(item.costPrice).toLocaleString()}</p>
         </div>
       </div>
     </div>
@@ -129,7 +124,7 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
   
   const isEditing = !!initialData?.id;
 
-  const { data: configCategories = [] } = useQuery({
+  const { data: configCategories = [] } = useQuery<string[]>({
     queryKey: ["/api/config/categories"],
   });
 
@@ -139,8 +134,8 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
     const data = {
       name: formData.get("name") as string,
       category: formData.get("category") as string,
-      costPrice: Math.round(Number(formData.get("costPrice")) * 100), // Convert to cents
-      sellingPrice: Math.round(Number(formData.get("sellingPrice")) * 100), // Convert to cents
+      costPrice: Number(formData.get("costPrice")),
+      sellingPrice: Number(formData.get("sellingPrice")),
       minStock: Number(formData.get("minStock")),
     };
 
@@ -158,7 +153,7 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
     }
   };
 
-  const categories = configCategories.length > 0 ? configCategories : ["Drinks", "Snacks", "Main", "Dessert"];
+  const categories: string[] = (configCategories as string[]).length > 0 ? (configCategories as string[]) : ["Drinks", "Snacks", "Main", "Dessert"];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

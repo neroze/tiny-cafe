@@ -21,6 +21,8 @@ export interface IStorage {
   // Sales
   getSales(date?: Date, limit?: number): Promise<(Sale & { item: Item })[]>;
   createSale(sale: InsertSale): Promise<Sale>;
+  updateSale(id: number, updates: Partial<InsertSale>): Promise<Sale>;
+  getSalesRange(from?: Date, to?: Date, limit?: number): Promise<(Sale & { item: Item })[]>;
   getDashboardStats(range?: 'weekly' | 'monthly' | 'quarterly'): Promise<{
     dailySales: number;
     weeklySales: number;
@@ -152,6 +154,23 @@ export class DatabaseStorage implements IStorage {
     await this.updateDailyStockSales(sale.itemId, sale.date, sale.quantity);
     return sale;
   }
+  
+  async updateSale(id: number, updates: Partial<InsertSale>): Promise<Sale> {
+    // Fetch existing sale
+    const [existing] = await db.select().from(sales).where(eq(sales.id, id)).limit(1);
+    if (!existing) throw new Error("Sale not found");
+    const [updated] = await db.update(sales).set(updates).where(eq(sales.id, id)).returning();
+    // Recalculate stock for old item/date and new item/date
+    const oldItemId = existing.itemId;
+    const oldDate = existing.date;
+    const newItemId = updated.itemId;
+    const newDate = updated.date;
+    await this.recalcDailyStockSales(oldItemId, oldDate);
+    if (oldItemId !== newItemId || startOfDay(oldDate).getTime() !== startOfDay(newDate).getTime()) {
+      await this.recalcDailyStockSales(newItemId, newDate);
+    }
+    return updated;
+  }
 
   private async updateDailyStockSales(itemId: number, date: Date, quantity: number) {
     const dayStart = startOfDay(date);
@@ -178,6 +197,35 @@ export class DatabaseStorage implements IStorage {
         sold: quantity,
         wastage: 0,
         closingStock: 0 - quantity
+      });
+    }
+  }
+  
+  private async recalcDailyStockSales(itemId: number, date: Date) {
+    const dayStart = startOfDay(date);
+    const dayEnd = endOfDay(date);
+    const daySales = await db.select({ quantity: sales.quantity })
+      .from(sales)
+      .where(and(eq(sales.itemId, itemId), gte(sales.date, dayStart), lte(sales.date, dayEnd)));
+    const totalSold = daySales.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+    const existing = await db.select().from(stock)
+      .where(and(eq(stock.itemId, itemId), gte(stock.date, dayStart), lte(stock.date, dayEnd)))
+      .limit(1);
+    if (existing.length > 0) {
+      const current = existing[0];
+      const newClosing = (current.openingStock || 0) + (current.purchased || 0) - totalSold - (current.wastage || 0);
+      await db.update(stock)
+        .set({ sold: totalSold, closingStock: newClosing })
+        .where(eq(stock.id, current.id));
+    } else {
+      await db.insert(stock).values({
+        itemId,
+        date,
+        openingStock: 0,
+        purchased: 0,
+        sold: totalSold,
+        wastage: 0,
+        closingStock: 0 - totalSold
       });
     }
   }

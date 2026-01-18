@@ -67,7 +67,7 @@ export default function ExpensesPage() {
     frequency: "daily" as "daily" | "monthly" | "yearly",
   });
 
-  const formatCurrency = (val: number) => `NPR ${(val / 100).toLocaleString()}`;
+  const formatCurrency = (val: number) => `NPR ${val.toLocaleString()}`;
 
   const [search, setSearch] = React.useState("");
   const [page, setPage] = React.useState(1);
@@ -223,8 +223,8 @@ export default function ExpensesPage() {
                 <Label className="text-right text-sm">Amount (NPR)</Label>
                 <Input
                   type="number"
-                  value={(form.amount / 100).toString()}
-                  onChange={(e) => setForm({ ...form, amount: Math.round(Number(e.target.value) * 100) })}
+                  value={form.amount.toString()}
+                  onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })}
                   className="col-span-3"
                 />
               </div>
@@ -393,9 +393,9 @@ export default function ExpensesPage() {
                     <Label className="text-right text-sm">Amount (NPR)</Label>
                     <Input
                       type="number"
-                      value={(editingForm.amount / 100).toString()}
+                      value={editingForm.amount.toString()}
                       onChange={(e) =>
-                        setEditingForm({ ...editingForm, amount: Math.round(Number(e.target.value) * 100) })
+                        setEditingForm({ ...editingForm, amount: Number(e.target.value) })
                       }
                       className="col-span-3"
                     />

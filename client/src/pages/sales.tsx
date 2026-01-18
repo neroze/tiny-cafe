@@ -1,8 +1,9 @@
 import { useState, useMemo } from "react";
 import { Layout } from "@/components/layout";
 import { PageHeader, Button, Input, Select, Card } from "@/components/ui-components";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useItems } from "@/hooks/use-items";
-import { useCreateSale, useSales } from "@/hooks/use-sales";
+import { useCreateSale, useSales, useUpdateSale } from "@/hooks/use-sales";
 import { useToast } from "@/hooks/use-toast";
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from "date-fns";
 import { Plus, Coffee, X } from "lucide-react";
@@ -19,6 +20,7 @@ export default function SalesEntry() {
   const [itemId, setItemId] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [customPrice, setCustomPrice] = useState(""); // Optional custom price overrides
+  const [discount, setDiscount] = useState("0");
   const [labels, setLabels] = useState<string[]>([]);
   const [currentLabel, setCurrentLabel] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -47,6 +49,7 @@ export default function SalesEntry() {
   const { data: items = [] } = useItems();
   const { data: todaysSales = [], isLoading: isLoadingSales } = useSales({ date, limit: "50" });
   const createSale = useCreateSale();
+  const updateSale = useUpdateSale();
 
   // Derived
   const selectedItem = useMemo(() => 
@@ -57,9 +60,9 @@ export default function SalesEntry() {
   // Update price when item changes
   const unitPrice = customPrice 
     ? Number(customPrice) 
-    : (selectedItem ? selectedItem.sellingPrice / 100 : 0);
+    : (selectedItem ? selectedItem.sellingPrice : 0);
 
-  const total = unitPrice * Number(quantity);
+  const total = Math.max(0, (unitPrice * Number(quantity)) - Number(discount || 0));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,8 +73,8 @@ export default function SalesEntry() {
         date: new Date(date).toISOString(),
         itemId: selectedItem.id,
         quantity: Number(quantity),
-        unitPrice: Math.round(unitPrice * 100), // Convert back to cents
-        total: Math.round(total * 100),
+        unitPrice: Number(unitPrice),
+        total: Number(total),
         labels: labels
       });
       
@@ -84,6 +87,7 @@ export default function SalesEntry() {
       setQuantity("1");
       setItemId("");
       setCustomPrice("");
+      setDiscount("0");
       setLabels([]);
     } catch (error: any) {
       toast({
@@ -117,15 +121,15 @@ export default function SalesEntry() {
             <>
               <div className="rounded-xl border border-border bg-card p-4">
                 <div className="text-sm text-muted-foreground">Today</div>
-                <div className="text-2xl font-display">NPR {(sum(todayRange) / 100).toLocaleString()}</div>
+                <div className="text-2xl font-display">NPR {sum(todayRange).toLocaleString()}</div>
               </div>
               <div className="rounded-xl border border-border bg-card p-4">
                 <div className="text-sm text-muted-foreground">This Week</div>
-                <div className="text-2xl font-display">NPR {(sum(weekRange) / 100).toLocaleString()}</div>
+                <div className="text-2xl font-display">NPR {sum(weekRange).toLocaleString()}</div>
               </div>
               <div className="rounded-xl border border-border bg-card p-4">
                 <div className="text-sm text-muted-foreground">This Month</div>
-                <div className="text-2xl font-display">NPR {(sum(monthRange) / 100).toLocaleString()}</div>
+                <div className="text-2xl font-display">NPR {sum(monthRange).toLocaleString()}</div>
               </div>
             </>
           );
@@ -186,12 +190,23 @@ export default function SalesEntry() {
                   <Input 
                     type="number" 
                     step="0.01"
-                    value={customPrice || (selectedItem ? selectedItem.sellingPrice / 100 : "")}
+                    value={customPrice || (selectedItem ? selectedItem.sellingPrice : "")}
                     onChange={e => setCustomPrice(e.target.value)}
-                    placeholder={selectedItem ? String(selectedItem.sellingPrice / 100) : "0.00"}
+                    placeholder={selectedItem ? String(selectedItem.sellingPrice) : "0.00"}
                     required 
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">Discount (NPR)</label>
+                <Input 
+                  type="number"
+                  step="0.01"
+                  value={discount}
+                  onChange={e => setDiscount(e.target.value)}
+                  placeholder="0.00"
+                />
               </div>
 
               <div className="relative">
@@ -289,10 +304,40 @@ export default function SalesEntry() {
                 const [to, setTo] = useState<string>(todayStr);
                 const [page, setPage] = useState(1);
                 const [pageSize, setPageSize] = useState(10);
+                const [editing, setEditing] = useState<any | null>(null);
+                const [formEdit, setFormEdit] = useState({ itemId: 0, quantity: 1, unitPrice: 0, total: 0 });
+                const [editDiscount, setEditDiscount] = useState(0);
                 const { data: rangeSales = [] } = useSales({ from, to, limit: "5000" });
                 const pageCount = Math.max(1, Math.ceil(rangeSales.length / pageSize));
                 const startIndex = (page - 1) * pageSize;
                 const visible = rangeSales.slice(startIndex, startIndex + pageSize);
+                const openEdit = (sale: any) => {
+                  setEditing(sale);
+                  setFormEdit({
+                    itemId: sale.itemId,
+                    quantity: sale.quantity,
+                    unitPrice: Number(sale.unitPrice || 0),
+                    total: Number(sale.total || 0),
+                  });
+                  const impliedDiscount = Math.max(
+                    0,
+                    (Number(sale.unitPrice || 0) * Number(sale.quantity || 0)) - Number(sale.total || 0)
+                  );
+                  setEditDiscount(impliedDiscount);
+                };
+                const saveEdit = async () => {
+                  if (!editing) return;
+                  const computedTotal = Math.max(0, (Number(formEdit.quantity) * Number(formEdit.unitPrice)) - Number(editDiscount || 0));
+                  await updateSale.mutateAsync({
+                    id: editing.id,
+                    itemId: Number(formEdit.itemId),
+                    quantity: Number(formEdit.quantity),
+                    unitPrice: Number(formEdit.unitPrice),
+                    total: Number(computedTotal),
+                    date: new Date(editing.date).toISOString(),
+                  });
+                  setEditing(null);
+                };
                 return (
                   <>
                     <Input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} />
@@ -315,6 +360,7 @@ export default function SalesEntry() {
                             <th className="pb-3 text-sm font-medium text-muted-foreground">Item</th>
                             <th className="pb-3 text-sm font-medium text-muted-foreground text-center">Qty</th>
                             <th className="pb-3 text-sm font-medium text-muted-foreground text-right pr-4">Total</th>
+                            <th className="pb-3"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -341,7 +387,10 @@ export default function SalesEntry() {
                                 </span>
                               </td>
                               <td className="py-3 text-right font-bold text-primary pr-4">
-                                NPR {(sale.total / 100).toLocaleString()}
+                                NPR {Number(sale.total).toLocaleString()}
+                              </td>
+                              <td className="py-3 text-right pr-4">
+                                <Button variant="outline" onClick={() => openEdit(sale)}>Edit</Button>
                               </td>
                             </tr>
                           ))}
@@ -354,60 +403,53 @@ export default function SalesEntry() {
                           )}
                         </tbody>
                       </table>
+                      <Dialog open={!!editing} onOpenChange={(v) => !v && setEditing(null)}>
+                        <DialogContent className="bg-background sm:max-w-[520px]">
+                          <DialogHeader>
+                            <DialogTitle className="font-display text-2xl">Edit Sale</DialogTitle>
+                          </DialogHeader>
+                          <div className="grid grid-cols-1 gap-4 mt-2">
+                            <div>
+                              <label className="block text-sm mb-1 text-muted-foreground">Item</label>
+                              <Select value={String(formEdit.itemId)} onChange={e => setFormEdit({ ...formEdit, itemId: Number(e.target.value) })}>
+                                <option value="">Select Item...</option>
+                                {items.map((item) => (
+                                  <option key={item.id} value={item.id}>{item.name}</option>
+                                ))}
+                              </Select>
+                            </div>
+                            <div className="grid grid-cols-4 gap-3">
+                              <div>
+                                <label className="block text-sm mb-1 text-muted-foreground">Quantity</label>
+                                <Input type="number" min={1} value={formEdit.quantity} onChange={e => setFormEdit({ ...formEdit, quantity: Number(e.target.value) })} />
+                              </div>
+                              <div>
+                                <label className="block text-sm mb-1 text-muted-foreground">Unit Price (NPR)</label>
+                                <Input type="number" step="0.01" value={formEdit.unitPrice} onChange={e => setFormEdit({ ...formEdit, unitPrice: Number(e.target.value) })} />
+                              </div>
+                              <div>
+                                <label className="block text-sm mb-1 text-muted-foreground">Discount (NPR)</label>
+                                <Input type="number" step="0.01" value={editDiscount} onChange={e => setEditDiscount(Number(e.target.value))} />
+                              </div>
+                              <div>
+                                <label className="block text-sm mb-1 text-muted-foreground">Total (auto)</label>
+                                <Input type="number" value={Math.max(0, (Number(formEdit.unitPrice) * Number(formEdit.quantity)) - Number(editDiscount || 0)).toString()} readOnly />
+                              </div>
+                            </div>
+                          </div>
+                          <DialogFooter>
+                            <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+                            <Button onClick={saveEdit} isLoading={updateSale.isPending}>Save</Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
                     </div>
                   </>
                 );
               })()}
             </div>
 
-            <div className="overflow-hidden">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border text-left">
-                    <th className="pb-3 text-sm font-medium text-muted-foreground pl-4">Time</th>
-                    <th className="pb-3 text-sm font-medium text-muted-foreground">Item</th>
-                    <th className="pb-3 text-sm font-medium text-muted-foreground text-center">Qty</th>
-                    <th className="pb-3 text-sm font-medium text-muted-foreground text-right pr-4">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {todaysSales.map((sale) => (
-                    <tr key={sale.id} className="group hover:bg-muted/50 transition-colors">
-                      <td className="py-3 text-sm text-muted-foreground pl-4">
-                        {format(new Date(sale.createdAt || new Date()), "hh:mm a")}
-                      </td>
-                      <td className="py-3 font-medium text-foreground">
-                        <div>{sale.item?.name}</div>
-                        {sale.labels && sale.labels.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {sale.labels.map((label: string, i: number) => (
-                              <Badge key={i} variant="outline" className="text-[10px] px-1 py-0 h-4 uppercase">
-                                {label}
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-3 text-center text-muted-foreground">
-                        <span className="inline-flex items-center justify-center bg-secondary w-8 h-8 rounded-full text-xs font-bold">
-                          {sale.quantity}
-                        </span>
-                      </td>
-                      <td className="py-3 text-right font-bold text-primary pr-4">
-                        NPR {(sale.total / 100).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                  {todaysSales.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="py-12 text-center text-muted-foreground">
-                        No sales recorded for this date.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            {/* Single unified list above; removed duplicate today's list */}
           </Card>
         </div>
       </div>

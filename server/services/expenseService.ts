@@ -4,21 +4,18 @@ import { z } from "zod";
 
 export async function listExpenses(from?: Date, to?: Date) {
   const data = await storage.getExpenses(from, to);
-
-  console.log('=========')
-  console.log(data);
   return {
-    total: data.total,
-    byCategory: data.byCategory,
+    total: Number(data.total),
+    byCategory: Object.fromEntries(Object.entries(data.byCategory).map(([k, v]) => [k, Number(v)])),
     items: data.items.map(e => ({
       id: (e as any).id,
       date: ((e.isRecurring && from) ? from : (e.date as Date)).toISOString(),
       category: e.category,
       description: e.description || "",
-      amount: e.amount,
+      amount: Number(e.amount),
       isRecurring: e.isRecurring || false,
       frequency: (e as any).frequency || "daily",
-      allocatedDaily: (e as any).allocatedDaily,
+      allocatedDaily: (e as any).allocatedDaily !== undefined ? Number((e as any).allocatedDaily) : undefined,
     })),
   };
 }
@@ -33,7 +30,11 @@ export async function createExpenseFromBody(body: any) {
 }
 
 export async function updateExpenseFromBody(id: number, body: any) {
-  const input = api.expenses.update.input.parse(body);
+  const payload: any = { ...body };
+  if (payload.amount !== undefined) {
+    payload.amount = Number(payload.amount);
+  }
+  const input = api.expenses.update.input.parse(payload);
   return await storage.updateExpense(id, input);
 }
 
@@ -63,4 +64,10 @@ export async function removeExpenseCategory(category: string) {
   cats = cats.filter((c: string) => c !== category);
   await storage.setSetting("configured_expense_categories", JSON.stringify(cats));
   return cats;
+}
+
+export async function listExpensesByQuery(params?: { from?: string; to?: string }) {
+  const from = params?.from ? new Date(`${params.from}T00:00:00`) : undefined;
+  const to = params?.to ? new Date(`${params.to}T00:00:00`) : undefined;
+  return await listExpenses(from, to);
 }

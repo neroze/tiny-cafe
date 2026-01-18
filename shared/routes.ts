@@ -81,6 +81,15 @@ export const api = {
         400: errorSchemas.validation,
       },
     },
+    update: {
+      method: 'PUT' as const,
+      path: '/api/sales/:id',
+      input: insertSaleSchema.partial(),
+      responses: {
+        200: z.custom<typeof sales.$inferSelect>(),
+        404: errorSchemas.notFound,
+      },
+    },
   },
   stock: {
     list: {

@@ -1,9 +1,9 @@
 import type { Handler } from "@netlify/functions";
-import { listExpenses, createExpenseFromBody, updateExpenseFromBody, deleteExpenseById, getExpenseCategories, addExpenseCategory, removeExpenseCategory } from "../../server/services/expenseService";
+import { listExpensesByQuery, createExpenseFromBody, updateExpenseFromBody, deleteExpenseById, getExpenseCategories, addExpenseCategory, removeExpenseCategory } from "../../server/services/expenseService";
 import { api } from "../../shared/routes";
 import { z } from "zod";
 import { listItems, getItemById, createItemFromBody, updateItemFromBody, deleteItemById } from "../../server/services/itemService";
-import { listSales, createSaleFromBody } from "../../server/services/salesService";
+import { listSalesByQuery, createSaleFromBody } from "../../server/services/salesService";
 import { listStock, recordStockTransactionFromBody } from "../../server/services/stockService";
 import { getDashboardStats, getProfit, getExportCSV, getTargets, updateTargetsFromBody } from "../../server/services/dashboardService";
 import { getMergedLabels, getConfiguredLabels, addLabel, removeLabel, getConfiguredCategories, addCategory, removeCategory } from "../../server/services/configService";
@@ -55,9 +55,7 @@ export const handler: Handler = async (event) => {
     const path = normalizePath(event.path);
 
     if (method === "GET" && path === api.expenses.list.path) {
-      const from = qp.from ? new Date(`${qp.from}T00:00:00`) : undefined;
-      const to = qp.to ? new Date(`${qp.to}T00:00:00`) : undefined;
-      const result = await listExpenses(from, to);
+      const result = await listExpensesByQuery({ from: qp.from, to: qp.to });
       return json(200, result);
     }
 
@@ -141,16 +139,21 @@ export const handler: Handler = async (event) => {
     }
 
     if (method === "GET" && path === api.sales.list.path) {
-      const limit = qp.limit ? Number(qp.limit) : 50;
-      if (qp.from || qp.to) {
-        const from = qp.from ? new Date(`${qp.from}T00:00:00`) : undefined;
-        const to = qp.to ? new Date(`${qp.to}T00:00:00`) : undefined;
-        const sales = await (await import("../../server/services/salesService")).listSalesRange(from, to, limit);
-        return json(200, sales);
-      } else {
-        const date = qp.date ? new Date(`${qp.date}T00:00:00`) : undefined;
-        const sales = await listSales(date, limit);
-        return json(200, sales);
+      const sales = await listSalesByQuery({ date: qp.date, from: qp.from, to: qp.to, limit: qp.limit });
+      return json(200, sales);
+    }
+    
+    if (method === "PUT" && path.startsWith("/api/sales/")) {
+      try {
+        const idStr = path.split("/").pop();
+        const id = Number(idStr);
+        const sale = await (await import("../../server/services/salesService")).updateSaleFromBody(id, body);
+        return json(200, sale);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          return json(400, { message: err.message });
+        }
+        return json(404, { message: "Sale not found" });
       }
     }
 

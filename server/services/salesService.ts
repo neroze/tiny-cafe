@@ -33,3 +33,28 @@ export async function createSaleFromBody(body: any) {
   });
   return await storage.createSale(input);
 }
+
+export async function updateSaleFromBody(id: number, body: any) {
+  const raw = { ...body };
+  const updates = api.sales.update.input.parse({
+    ...raw,
+    itemId: raw.itemId !== undefined ? Number(raw.itemId) : undefined,
+    quantity: raw.quantity !== undefined ? Number(raw.quantity) : undefined,
+    unitPrice: raw.unitPrice !== undefined ? Number(raw.unitPrice) : undefined,
+    total: raw.total !== undefined ? Number(raw.total) : undefined,
+    date: raw.date ? new Date(raw.date) : undefined,
+    labels: raw.labels || undefined,
+  });
+  return await storage.updateSale(id, updates as any);
+}
+
+export async function listSalesByQuery(params?: { date?: string; from?: string; to?: string; limit?: string | number }) {
+  const limit = params?.limit ? Number(params.limit) : 50;
+  if (params?.from || params?.to) {
+    const from = params?.from ? new Date(`${params.from}T00:00:00`) : undefined;
+    const to = params?.to ? new Date(`${params.to}T00:00:00`) : undefined;
+    return await listSalesRange(from, to, limit);
+  }
+  const date = params?.date ? new Date(`${params.date}T00:00:00`) : undefined;
+  return await listSales(date, limit);
+}

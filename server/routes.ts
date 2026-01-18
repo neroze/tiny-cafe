@@ -102,6 +102,17 @@ export async function registerRoutes(
       return res.json(sales);
     }
   });
+  
+  app.put(api.sales.update.path, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const sale = await (await import("./services/salesService")).updateSaleFromBody(id, req.body);
+      res.json(sale);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      res.status(404).json({ message: "Sale not found" });
+    }
+  });
 
   app.post(api.sales.create.path, async (req, res) => {
     try {

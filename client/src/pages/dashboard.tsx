@@ -32,7 +32,7 @@ export default function Dashboard() {
   const { data: stats, isLoading } = useDashboardStats(range);
   const { data: profit } = useProfit(range);
 
-  const { data: targets } = useQuery({
+  const { data: targets } = useQuery<{ weekly: number; monthly: number; quarterly: number }>({
     queryKey: [api.dashboard.get_targets.path],
   });
 
@@ -53,11 +53,11 @@ export default function Dashboard() {
   const [newConfigLabel, setNewConfigLabel] = React.useState("");
   const [newConfigCategory, setNewConfigCategory] = React.useState("");
 
-  const { data: configLabels = [] } = useQuery({
+  const { data: configLabels = [] } = useQuery<string[]>({
     queryKey: ["/api/config/labels"],
   });
 
-  const { data: configCategories = [] } = useQuery({
+  const { data: configCategories = [] } = useQuery<string[]>({
     queryKey: ["/api/config/categories"],
   });
 
