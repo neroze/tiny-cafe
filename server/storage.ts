@@ -1,9 +1,10 @@
 import { db } from "./db";
 import {
-  items, sales, stock, settings,
+  items, sales, stock, settings, expenses,
   type Item, type InsertItem,
   type Sale, type InsertSale,
   type Stock, type InsertStock,
+  type Expense, type InsertExpense,
   type CreateStockTransactionRequest
 } from "@shared/schema";
 import { eq, sql, and, desc, sum, gte, lte } from "drizzle-orm";
@@ -20,6 +21,8 @@ export interface IStorage {
   // Sales
   getSales(date?: Date, limit?: number): Promise<(Sale & { item: Item })[]>;
   createSale(sale: InsertSale): Promise<Sale>;
+  updateSale(id: number, updates: Partial<InsertSale>): Promise<Sale>;
+  getSalesRange(from?: Date, to?: Date, limit?: number): Promise<(Sale & { item: Item })[]>;
   getDashboardStats(range?: 'weekly' | 'monthly' | 'quarterly'): Promise<{
     dailySales: number;
     weeklySales: number;
@@ -49,6 +52,28 @@ export interface IStorage {
 
   // Labels
   getUniqueLabels(): Promise<string[]>;
+
+  // Expenses
+  getExpenses(from?: Date, to?: Date): Promise<{
+    total: number;
+    byCategory: Record<string, number>;
+    items: (Expense & { allocatedDaily?: number })[];
+  }>;
+  createExpense(expense: InsertExpense): Promise<Expense>;
+  updateExpense(id: number, updates: Partial<InsertExpense>): Promise<Expense>;
+  deleteExpense(id: number): Promise<void>;
+
+  // Profit
+  getProfit(range?: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'): Promise<{
+    totalSales: number;
+    totalCOGS: number;
+    grossProfit: number;
+    totalExpenses: number;
+    netProfit: number;
+    netMarginPct: number;
+    trend: { date: string; net: number }[];
+    alerts: { consecutiveNetLossDays: number; expenseSpike: boolean };
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -103,10 +128,48 @@ export class DatabaseStorage implements IStorage {
     return await query.orderBy(desc(sales.date)).limit(limit) as any;
   }
 
+  async getSalesRange(from?: Date, to?: Date, limit: number = 500): Promise<(Sale & { item: Item })[]> {
+    const start = from ? startOfDay(from) : startOfMonth(new Date());
+    const end = to ? endOfDay(to) : endOfDay(new Date());
+    return await db.select({
+      id: sales.id,
+      date: sales.date,
+      itemId: sales.itemId,
+      quantity: sales.quantity,
+      unitPrice: sales.unitPrice,
+      total: sales.total,
+      labels: sales.labels,
+      createdAt: sales.createdAt,
+      item: items
+    })
+    .from(sales)
+    .innerJoin(items, eq(sales.itemId, items.id))
+    .where(and(gte(sales.date, start), lte(sales.date, end)))
+    .orderBy(desc(sales.date))
+    .limit(limit) as any;
+  }
+
   async createSale(insertSale: InsertSale): Promise<Sale> {
     const [sale] = await db.insert(sales).values(insertSale).returning();
     await this.updateDailyStockSales(sale.itemId, sale.date, sale.quantity);
     return sale;
+  }
+  
+  async updateSale(id: number, updates: Partial<InsertSale>): Promise<Sale> {
+    // Fetch existing sale
+    const [existing] = await db.select().from(sales).where(eq(sales.id, id)).limit(1);
+    if (!existing) throw new Error("Sale not found");
+    const [updated] = await db.update(sales).set(updates).where(eq(sales.id, id)).returning();
+    // Recalculate stock for old item/date and new item/date
+    const oldItemId = existing.itemId;
+    const oldDate = existing.date;
+    const newItemId = updated.itemId;
+    const newDate = updated.date;
+    await this.recalcDailyStockSales(oldItemId, oldDate);
+    if (oldItemId !== newItemId || startOfDay(oldDate).getTime() !== startOfDay(newDate).getTime()) {
+      await this.recalcDailyStockSales(newItemId, newDate);
+    }
+    return updated;
   }
 
   private async updateDailyStockSales(itemId: number, date: Date, quantity: number) {
@@ -134,6 +197,35 @@ export class DatabaseStorage implements IStorage {
         sold: quantity,
         wastage: 0,
         closingStock: 0 - quantity
+      });
+    }
+  }
+  
+  private async recalcDailyStockSales(itemId: number, date: Date) {
+    const dayStart = startOfDay(date);
+    const dayEnd = endOfDay(date);
+    const daySales = await db.select({ quantity: sales.quantity })
+      .from(sales)
+      .where(and(eq(sales.itemId, itemId), gte(sales.date, dayStart), lte(sales.date, dayEnd)));
+    const totalSold = daySales.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
+    const existing = await db.select().from(stock)
+      .where(and(eq(stock.itemId, itemId), gte(stock.date, dayStart), lte(stock.date, dayEnd)))
+      .limit(1);
+    if (existing.length > 0) {
+      const current = existing[0];
+      const newClosing = (current.openingStock || 0) + (current.purchased || 0) - totalSold - (current.wastage || 0);
+      await db.update(stock)
+        .set({ sold: totalSold, closingStock: newClosing })
+        .where(eq(stock.id, current.id));
+    } else {
+      await db.insert(stock).values({
+        itemId,
+        date,
+        openingStock: 0,
+        purchased: 0,
+        sold: totalSold,
+        wastage: 0,
+        closingStock: 0 - totalSold
       });
     }
   }
@@ -387,6 +479,178 @@ export class DatabaseStorage implements IStorage {
       }
     });
     return Array.from(labelSet).sort();
+  }
+
+  private daysBetweenInclusive(from: Date, to: Date) {
+    const start = startOfDay(from).getTime();
+    const end = endOfDay(to).getTime();
+    return Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1;
+  }
+
+  private dailyAllocationFor(exp: Expense, date: Date) {
+    const d = new Date(date);
+    if (!exp.isRecurring) return exp.amount;
+    if (exp.frequency === 'daily') return exp.amount;
+    if (exp.frequency === 'monthly') {
+      const daysInMonth = endOfMonth(d).getDate();
+      return Math.round(exp.amount / daysInMonth);
+    }
+    // yearly
+    const startY = startOfMonth(new Date(d.getFullYear(), 0, 1));
+    const endY = endOfMonth(new Date(d.getFullYear(), 11, 1));
+    const daysInYear = this.daysBetweenInclusive(startY, endY);
+    return Math.round(exp.amount / daysInYear);
+  }
+
+  async getExpenses(from?: Date, to?: Date): Promise<{
+    total: number;
+    byCategory: Record<string, number>;
+    items: (Expense & { allocatedDaily?: number })[];
+  }> {
+    const start = from ? startOfDay(from) : startOfMonth(new Date());
+    const end = to ? endOfDay(to) : endOfDay(new Date());
+
+    const oneTimeRows = await db
+      .select()
+      .from(expenses)
+      .where(and(eq(expenses.isRecurring, false), and(gte(expenses.date, start), lte(expenses.date, end))));
+
+    const recurringRows = await db
+      .select()
+      .from(expenses)
+      .where(eq(expenses.isRecurring, true));
+
+    const items: (Expense & { allocatedDaily?: number })[] = [];
+    let total = 0;
+    const byCategory: Record<string, number> = {};
+
+    for (const exp of oneTimeRows) {
+      total += exp.amount;
+      byCategory[exp.category] = (byCategory[exp.category] || 0) + exp.amount;
+      items.push(exp);
+    }
+
+    for (const exp of recurringRows) {
+      if (exp.date <= end) {
+        const days = this.daysBetweenInclusive(start, end);
+        const daily = this.dailyAllocationFor(exp, start);
+        const allocated = daily * days;
+        total += allocated;
+        byCategory[exp.category] = (byCategory[exp.category] || 0) + allocated;
+        if (exp.date >= start && exp.date <= end) {
+          items.push({ ...exp, allocatedDaily: daily });
+        }
+      }
+    }
+
+    return { total, byCategory, items };
+  }
+
+  async createExpense(expense: InsertExpense): Promise<Expense> {
+    const [row] = await db.insert(expenses).values(expense).returning();
+    return row;
+  }
+
+  async updateExpense(id: number, updates: Partial<InsertExpense>): Promise<Expense> {
+    const [row] = await db.update(expenses).set(updates).where(eq(expenses.id, id)).returning();
+    return row;
+  }
+
+  async deleteExpense(id: number): Promise<void> {
+    await db.delete(expenses).where(eq(expenses.id, id));
+  }
+
+  async getProfit(range: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' = 'daily') {
+    const now = new Date();
+    let start: Date;
+    let end: Date;
+
+    switch (range) {
+      case 'weekly':
+        start = startOfWeek(now);
+        end = endOfWeek(now);
+        break;
+      case 'monthly':
+        start = startOfMonth(now);
+        end = endOfMonth(now);
+        break;
+      case 'quarterly':
+        start = startOfQuarter(now);
+        end = endOfQuarter(now);
+        break;
+      case 'yearly':
+        start = startOfMonth(new Date(now.getFullYear(), 0, 1));
+        end = endOfMonth(new Date(now.getFullYear(), 11, 1));
+        break;
+      case 'daily':
+      default:
+        start = startOfDay(now);
+        end = endOfDay(now);
+    }
+
+    const salesRows = await db.select({
+      date: sales.date,
+      quantity: sales.quantity,
+      total: sales.total,
+      costPrice: items.costPrice,
+    })
+      .from(sales)
+      .innerJoin(items, eq(sales.itemId, items.id))
+      .where(and(gte(sales.date, start), lte(sales.date, end)));
+
+    const totalSales = salesRows.reduce((sum, r) => sum + Number(r.total), 0);
+    const totalCOGS = salesRows.reduce((sum, r) => sum + Number(r.quantity) * Number(r.costPrice), 0);
+    const grossProfit = totalSales - totalCOGS;
+
+    const expensesAgg = await this.getExpenses(start, end);
+    const totalExpenses = expensesAgg.total;
+    const netProfit = grossProfit - totalExpenses;
+    const netMarginPct = totalSales > 0 ? (netProfit / totalSales) * 100 : 0;
+
+    // Trend: compute daily net within range
+    const days = this.daysBetweenInclusive(start, end);
+    const trend: { date: string; net: number }[] = [];
+    for (let i = 0; i < days; i++) {
+      const day = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
+      const dStart = startOfDay(day);
+      const dEnd = endOfDay(day);
+      const dSales = salesRows.filter(r => r.date >= dStart && r.date <= dEnd);
+      const dSalesTotal = dSales.reduce((s, r) => s + Number(r.total), 0);
+      const dCOGS = dSales.reduce((s, r) => s + Number(r.quantity) * Number(r.costPrice), 0);
+      const dExpenses = expensesAgg.items.reduce((s, e) => {
+        if (e.isRecurring) return s + (e.allocatedDaily || 0);
+        return s + (e.date >= dStart && e.date <= dEnd ? e.amount : 0);
+      }, 0);
+      trend.push({ date: dStart.toISOString(), net: dSalesTotal - dCOGS - dExpenses });
+    }
+
+    // Alerts
+    let consecutiveNetLossDays = 0;
+    let currentStreak = 0;
+    for (const t of trend) {
+      if (t.net < 0) currentStreak += 1;
+      else currentStreak = 0;
+      consecutiveNetLossDays = Math.max(consecutiveNetLossDays, currentStreak);
+    }
+    const lastDayExpense = trend.length > 0 ? expensesAgg.items.reduce((s, e) => {
+      const dStart = startOfDay(end);
+      const dEnd = endOfDay(end);
+      if (e.isRecurring) return s + (e.allocatedDaily || 0);
+      return s + (e.date >= dStart && e.date <= dEnd ? e.amount : 0);
+    }, 0) : 0;
+    const avgExpense = totalExpenses / days;
+    const expenseSpike = lastDayExpense > avgExpense * 1.5;
+
+    return {
+      totalSales,
+      totalCOGS,
+      grossProfit,
+      totalExpenses,
+      netProfit,
+      netMarginPct,
+      trend,
+      alerts: { consecutiveNetLossDays, expenseSpike },
+    };
   }
 }
 

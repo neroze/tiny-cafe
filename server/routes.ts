@@ -1,8 +1,14 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
+import { listExpenses, createExpenseFromBody, updateExpenseFromBody, deleteExpenseById, getExpenseCategories, addExpenseCategory, removeExpenseCategory } from "./services/expenseService";
 import { api } from "@shared/routes";
 import { z } from "zod";
+import { listItems, getItemById, createItemFromBody, updateItemFromBody, deleteItemById } from "./services/itemService";
+import { listSales, createSaleFromBody } from "./services/salesService";
+import { listStock, recordStockTransactionFromBody } from "./services/stockService";
+import { getDashboardStats, getProfit, getExportCSV, getTargets, updateTargetsFromBody } from "./services/dashboardService";
+import { getMergedLabels, getConfiguredLabels, addLabel, removeLabel, getConfiguredCategories, addCategory, removeCategory } from "./services/configService";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -11,20 +17,19 @@ export async function registerRoutes(
 
   // Items
   app.get(api.items.list.path, async (req, res) => {
-    const items = await storage.getItems();
+    const items = await listItems();
     res.json(items);
   });
 
   app.get(api.items.get.path, async (req, res) => {
-    const item = await storage.getItem(Number(req.params.id));
+    const item = await getItemById(Number(req.params.id));
     if (!item) return res.status(404).json({ message: "Item not found" });
     res.json(item);
   });
 
   app.post(api.items.create.path, async (req, res) => {
     try {
-      const input = api.items.create.input.parse(req.body);
-      const item = await storage.createItem(input);
+      const item = await createItemFromBody(req.body);
       res.status(201).json(item);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -36,8 +41,7 @@ export async function registerRoutes(
 
   app.put(api.items.update.path, async (req, res) => {
     try {
-      const input = api.items.update.input.parse(req.body);
-      const item = await storage.updateItem(Number(req.params.id), input);
+      const item = await updateItemFromBody(Number(req.params.id), req.body);
       res.json(item);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
@@ -46,50 +50,73 @@ export async function registerRoutes(
   });
 
   app.delete(api.items.delete.path, async (req, res) => {
-    await storage.deleteItem(Number(req.params.id));
+    await deleteItemById(Number(req.params.id));
+    res.status(204).send();
+  });
+
+  // Expenses
+  app.get(api.expenses.list.path, async (req, res) => {
+    const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : undefined;
+    const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : undefined;
+    const result = await listExpenses(from, to);
+    res.json(result);
+  });
+
+  app.post(api.expenses.create.path, async (req, res) => {
+    try {
+      const exp = await createExpenseFromBody(req.body);
+      res.status(201).json(exp);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.put(api.expenses.update.path, async (req, res) => {
+    try {
+      const exp = await updateExpenseFromBody(Number(req.params.id), req.body);
+      res.json(exp);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      res.status(404).json({ message: "Expense not found" });
+    }
+  });
+
+  app.delete(api.expenses.delete.path, async (req, res) => {
+    await deleteExpenseById(Number(req.params.id));
     res.status(204).send();
   });
 
   // Sales
   app.get(api.sales.list.path, async (req, res) => {
-    const date = req.query.date ? new Date(req.query.date as string) : undefined;
     const limit = req.query.limit ? Number(req.query.limit) : 50;
-    const sales = await storage.getSales(date, limit);
-    res.json(sales);
+    const hasRange = req.query.from || req.query.to;
+    if (hasRange) {
+      const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : undefined;
+      const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : undefined;
+      const sales = await (await import("./services/salesService")).listSalesRange(from, to, limit);
+      return res.json(sales);
+    } else {
+      const date = req.query.date ? new Date(`${req.query.date as string}T00:00:00`) : undefined;
+      const sales = await listSales(date, limit);
+      return res.json(sales);
+    }
+  });
+  
+  app.put(api.sales.update.path, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const sale = await (await import("./services/salesService")).updateSaleFromBody(id, req.body);
+      res.json(sale);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      res.status(404).json({ message: "Sale not found" });
+    }
   });
 
   app.post(api.sales.create.path, async (req, res) => {
     try {
-      // Robust date and number parsing
-      const rawData = { ...req.body };
-      
-      // Coerce numeric values
-      const itemId = Number(rawData.itemId);
-      const quantity = Number(rawData.quantity);
-      const unitPrice = Number(rawData.unitPrice);
-      const total = Number(rawData.total);
-      
-      // Handle date properly - check if it's already a date object or string
-      let date: Date;
-      if (rawData.date) {
-        date = new Date(rawData.date);
-        // Fallback to now if invalid date
-        if (isNaN(date.getTime())) date = new Date();
-      } else {
-        date = new Date();
-      }
-
-      const input = api.sales.create.input.parse({
-        ...rawData,
-        itemId,
-        quantity,
-        unitPrice,
-        total,
-        date,
-        labels: rawData.labels || []
-      });
-      
-      const sale = await storage.createSale(input);
+      const sale = await createSaleFromBody(req.body);
       res.status(201).json(sale);
     } catch (err) {
       console.error("Sale creation error:", err);
@@ -105,18 +132,13 @@ export async function registerRoutes(
   // Stock
   app.get(api.stock.list.path, async (req, res) => {
     const date = req.query.date ? new Date(req.query.date as string) : new Date();
-    const stocks = await storage.getStock(date);
+    const stocks = await listStock(date);
     res.json(stocks);
   });
 
   app.post(api.stock.transaction.path, async (req, res) => {
     try {
-      const input = api.stock.transaction.input.parse({
-        ...req.body,
-        itemId: Number(req.body.itemId),
-        quantity: Number(req.body.quantity),
-      });
-      const stock = await storage.recordStockTransaction(input);
+      const stock = await recordStockTransactionFromBody(req.body);
       res.json(stock);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
@@ -126,64 +148,23 @@ export async function registerRoutes(
 
   // Dashboard
   app.get(api.dashboard.stats.path, async (req, res) => {
-    const stats = await storage.getDashboardStats(req.query.range as any);
+    const stats = await getDashboardStats(req.query.range as any);
+    res.json(stats);
+  });
+
+  app.get(api.dashboard.profit.path, async (req, res) => {
+    const stats = await getProfit(req.query.range as any);
     res.json(stats);
   });
 
   app.get(api.dashboard.export.path, async (req, res) => {
     try {
-      const from = req.query.from ? new Date(req.query.from as string) : new Date();
-      const to = req.query.to ? new Date(req.query.to as string) : new Date();
-      
-      const data = await storage.getExportData(from, to);
-      
-      let csv = "EXECUTIVE SUMMARY\n";
-      csv += `Report Period,${from.toLocaleDateString()} to ${to.toLocaleDateString()}\n`;
-      csv += `Total Revenue,NPR ${(data.summary.totalRevenue / 100).toFixed(2)}\n`;
-      csv += `Total Items Sold,${data.summary.totalItemsSold}\n`;
-      csv += `Average Order Value,NPR ${(data.summary.averageOrderValue / 100).toFixed(2)}\n`;
-      csv += `Top Performing Category,${data.summary.topCategory}\n`;
-      csv += `Total Stock Wastage,${data.summary.wastageTotal} units\n\n`;
-
-      csv += "SALES BY ITEM SUMMARY\n";
-      csv += "Item,Total Quantity,Total Revenue (NPR)\n";
-      const itemStats: Record<string, { qty: number, total: number }> = {};
-      data.sales.forEach(s => {
-        if (!itemStats[s.item.name]) itemStats[s.item.name] = { qty: 0, total: 0 };
-        itemStats[s.item.name].qty += s.quantity;
-        itemStats[s.item.name].total += s.total;
-      });
-      Object.entries(itemStats).forEach(([name, stats]) => {
-        csv += `"${name}",${stats.qty},${(stats.total / 100).toFixed(2)}\n`;
-      });
-      csv += "\n";
-
-      csv += "SALES BY LABEL SUMMARY\n";
-      csv += "Label,Total Quantity,Total Revenue (NPR)\n";
-      const summaryLabelStats: Record<string, { qty: number, total: number }> = {};
-      data.sales.forEach(s => {
-        const labels = s.labels || [];
-        labels.forEach((l: string) => {
-          if (!summaryLabelStats[l]) summaryLabelStats[l] = { qty: 0, total: 0 };
-          summaryLabelStats[l].qty += s.quantity;
-          summaryLabelStats[l].total += s.total;
-        });
-      });
-      Object.entries(summaryLabelStats).forEach(([label, stats]) => {
-        csv += `"${label}",${stats.qty},${(stats.total / 100).toFixed(2)}\n`;
-      });
-      csv += "\n";
-      
-      csv += "DETAILED SALES REPORT\n";
-      csv += "ID,Date,Item,Category,Quantity,Unit Cost (NPR),Selling Price (NPR),Labels,Total (NPR)\n";
-      
-      data.sales.forEach(s => {
-        csv += `${s.id},${s.date.toLocaleDateString()},"${s.item.name}",${s.item.category},${s.quantity},${(s.item.costPrice / 100).toFixed(2)},${(s.unitPrice / 100).toFixed(2)},"${(s.labels || []).join(', ')}",${(s.total / 100).toFixed(2)}\n`;
-      });
-
+      const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : new Date();
+      const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : new Date();
+      const { filename, content } = await getExportCSV(from, to);
       res.setHeader("Content-Type", "text/csv");
-      res.setHeader("Content-Disposition", `attachment; filename=cafe_report_${from.toISOString().split('T')[0]}.csv`);
-      res.send(csv);
+      res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
+      res.send(content);
     } catch (err) {
       console.error("Export error:", err);
       res.status(500).json({ message: "Failed to generate report" });
@@ -191,24 +172,14 @@ export async function registerRoutes(
   });
 
   app.get(api.dashboard.get_targets.path, async (req, res) => {
-    const weekly = await storage.getSetting('target_weekly');
-    const monthly = await storage.getSetting('target_monthly');
-    const quarterly = await storage.getSetting('target_quarterly');
-    
-    res.json({
-      weekly: Number(weekly) || 1550000,
-      monthly: Number(monthly) || 6670000,
-      quarterly: Number(quarterly) || 20000000,
-    });
+    const targets = await getTargets();
+    res.json(targets);
   });
 
   app.post(api.dashboard.update_targets.path, async (req, res) => {
     try {
-      const input = api.dashboard.update_targets.input.parse(req.body);
-      await storage.setSetting('target_weekly', input.weekly.toString());
-      await storage.setSetting('target_monthly', input.monthly.toString());
-      await storage.setSetting('target_quarterly', input.quarterly.toString());
-      res.json({ message: "Targets updated successfully" });
+      const result = await updateTargetsFromBody(req.body);
+      res.json(result);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
       res.status(500).json({ message: "Failed to update targets" });
@@ -216,66 +187,65 @@ export async function registerRoutes(
   });
 
   app.get(api.dashboard.labels.path, async (req, res) => {
-    const configuredLabels = await storage.getSetting('configured_labels');
-    const labels = configuredLabels ? JSON.parse(configuredLabels) : [];
-    const uniqueLabels = await storage.getUniqueLabels();
-    
-    // Merge configured labels with existing ones from sales
-    const merged = Array.from(new Set([...labels, ...uniqueLabels]));
+    const merged = await getMergedLabels();
     res.json(merged);
   });
 
   app.get("/api/config/labels", async (req, res) => {
-    const labelsStr = await storage.getSetting('configured_labels');
-    res.json(labelsStr ? JSON.parse(labelsStr) : []);
-  });
-
-  app.post("/api/config/labels", async (req, res) => {
-    const { label } = req.body;
-    if (!label) return res.status(400).json({ message: "Label required" });
-    
-    const labelsStr = await storage.getSetting('configured_labels');
-    let labels = labelsStr ? JSON.parse(labelsStr) : [];
-    if (!labels.includes(label)) {
-      labels.push(label);
-      await storage.setSetting('configured_labels', JSON.stringify(labels));
-    }
+    const labels = await getConfiguredLabels();
     res.json(labels);
   });
 
+  app.post("/api/config/labels", async (req, res) => {
+    try {
+      const labels = await addLabel(req.body.label);
+      res.json(labels);
+    } catch (err) {
+      return res.status(400).json({ message: (err as any)?.message || "Label required" });
+    }
+  });
+
   app.delete("/api/config/labels", async (req, res) => {
-    const { label } = req.body;
-    const labelsStr = await storage.getSetting('configured_labels');
-    let labels = labelsStr ? JSON.parse(labelsStr) : [];
-    labels = labels.filter((l: string) => l !== label);
-    await storage.setSetting('configured_labels', JSON.stringify(labels));
+    const labels = await removeLabel(req.body.label);
     res.json(labels);
   });
 
   app.get("/api/config/categories", async (req, res) => {
-    const catsStr = await storage.getSetting('configured_categories');
-    res.json(catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"]);
-  });
-
-  app.post("/api/config/categories", async (req, res) => {
-    const { category } = req.body;
-    if (!category) return res.status(400).json({ message: "Category required" });
-    
-    const catsStr = await storage.getSetting('configured_categories');
-    let cats = catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"];
-    if (!cats.includes(category)) {
-      cats.push(category);
-      await storage.setSetting('configured_categories', JSON.stringify(cats));
-    }
+    const cats = await getConfiguredCategories();
     res.json(cats);
   });
 
+  app.post("/api/config/categories", async (req, res) => {
+    try {
+      const cats = await addCategory(req.body.category);
+      res.json(cats);
+    } catch (err) {
+      return res.status(400).json({ message: (err as any)?.message || "Category required" });
+    }
+  });
+
   app.delete("/api/config/categories", async (req, res) => {
-    const { category } = req.body;
-    const catsStr = await storage.getSetting('configured_categories');
-    let cats = catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"];
-    cats = cats.filter((c: string) => c !== category);
-    await storage.setSetting('configured_categories', JSON.stringify(cats));
+    const cats = await removeCategory(req.body.category);
+    res.json(cats);
+  });
+
+  app.get("/api/config/expense-categories", async (req, res) => {
+    const cats = await getExpenseCategories();
+    res.json(cats);
+  });
+
+  app.post("/api/config/expense-categories", async (req, res) => {
+    try {
+      const cats = await addExpenseCategory(req.body.category);
+      res.json(cats);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      throw err;
+    }
+  });
+
+  app.delete("/api/config/expense-categories", async (req, res) => {
+    const cats = await removeExpenseCategory(req.body.category);
     res.json(cats);
   });
 

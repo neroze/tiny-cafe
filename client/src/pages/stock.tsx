@@ -54,13 +54,13 @@ export default function StockManagement() {
                   <td className="p-4 font-medium text-foreground">{s.item?.name}</td>
                   <td className="p-4 text-center text-muted-foreground">{s.openingStock}</td>
                   <td className="p-4 text-center font-medium text-green-600">
-                    {s.purchased > 0 ? `+${s.purchased}` : '-'}
+                    {Number(s.purchased || 0) > 0 ? `+${Number(s.purchased || 0)}` : '-'}
                   </td>
                   <td className="p-4 text-center font-medium text-blue-600">
-                    {s.sold > 0 ? `-${s.sold}` : '-'}
+                    {Number(s.sold || 0) > 0 ? `-${Number(s.sold || 0)}` : '-'}
                   </td>
                   <td className="p-4 text-center font-medium text-red-500">
-                    {s.wastage > 0 ? `-${s.wastage}` : '-'}
+                    {Number(s.wastage || 0) > 0 ? `-${Number(s.wastage || 0)}` : '-'}
                   </td>
                   <td className="p-4 text-center font-bold text-foreground bg-primary/5">
                     {s.closingStock}

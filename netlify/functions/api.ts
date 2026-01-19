@@ -1,7 +1,12 @@
 import type { Handler } from "@netlify/functions";
-import { storage } from "../../server/storage";
+import { listExpensesByQuery, createExpenseFromBody, updateExpenseFromBody, deleteExpenseById, getExpenseCategories, addExpenseCategory, removeExpenseCategory } from "../../server/services/expenseService";
 import { api } from "../../shared/routes";
 import { z } from "zod";
+import { listItems, getItemById, createItemFromBody, updateItemFromBody, deleteItemById } from "../../server/services/itemService";
+import { listSalesByQuery, createSaleFromBody } from "../../server/services/salesService";
+import { listStock, recordStockTransactionFromBody } from "../../server/services/stockService";
+import { getDashboardStats, getProfit, getExportCSV, getTargets, updateTargetsFromBody } from "../../server/services/dashboardService";
+import { getMergedLabels, getConfiguredLabels, addLabel, removeLabel, getConfiguredCategories, addCategory, removeCategory } from "../../server/services/configService";
 
 function json(statusCode: number, data: any) {
   return {
@@ -49,23 +54,60 @@ export const handler: Handler = async (event) => {
     const body = parseBody(event);
     const path = normalizePath(event.path);
 
+    if (method === "GET" && path === api.expenses.list.path) {
+      const result = await listExpensesByQuery({ from: qp.from, to: qp.to });
+      return json(200, result);
+    }
+
+    if (method === "POST" && path === api.expenses.create.path) {
+      try {
+        const exp = await createExpenseFromBody(body);
+        return json(201, exp);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          return json(400, { message: err.message });
+        }
+        throw err;
+      }
+    }
+
+    if (method === "PUT" && path.startsWith("/api/expenses/")) {
+      try {
+        const idStr = path.split("/").pop();
+        const id = Number(idStr);
+        const exp = await updateExpenseFromBody(id, body);
+        return json(200, exp);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          return json(400, { message: err.message });
+        }
+        return json(404, { message: "Expense not found" });
+      }
+    }
+
+    if (method === "DELETE" && path.startsWith("/api/expenses/")) {
+      const idStr = path.split("/").pop();
+      const id = Number(idStr);
+      await deleteExpenseById(id);
+      return { statusCode: 204, body: "" };
+    }
+
     if (method === "GET" && path === api.items.list.path) {
-      const items = await storage.getItems();
+      const items = await listItems();
       return json(200, items);
     }
 
     if (method === "GET" && path.startsWith("/api/items/")) {
       const idStr = path.split("/").pop();
       const id = Number(idStr);
-      const item = await storage.getItem(id);
+      const item = await getItemById(id);
       if (!item) return json(404, { message: "Item not found" });
       return json(200, item);
     }
 
     if (method === "POST" && path === api.items.create.path) {
       try {
-        const input = api.items.create.input.parse(body);
-        const item = await storage.createItem(input);
+        const item = await createItemFromBody(body);
         return json(201, item);
       } catch (err) {
         if (err instanceof z.ZodError) {
@@ -79,8 +121,7 @@ export const handler: Handler = async (event) => {
       try {
         const idStr = path.split("/").pop();
         const id = Number(idStr);
-        const input = api.items.update.input.parse(body);
-        const item = await storage.updateItem(id, input);
+        const item = await updateItemFromBody(id, body);
         return json(200, item);
       } catch (err) {
         if (err instanceof z.ZodError) {
@@ -93,50 +134,39 @@ export const handler: Handler = async (event) => {
     if (method === "DELETE" && path.startsWith("/api/items/")) {
       const idStr = path.split("/").pop();
       const id = Number(idStr);
-      await storage.deleteItem(id);
+      await deleteItemById(id);
       return { statusCode: 204, body: "" };
     }
 
     if (method === "GET" && path === api.sales.list.path) {
-      const date = qp.date ? new Date(qp.date) : undefined;
-      const limit = qp.limit ? Number(qp.limit) : 50;
-      const sales = await storage.getSales(date, limit);
+      const sales = await listSalesByQuery({ date: qp.date, from: qp.from, to: qp.to, limit: qp.limit });
       return json(200, sales);
+    }
+    
+    if (method === "PUT" && path.startsWith("/api/sales/")) {
+      try {
+        const idStr = path.split("/").pop();
+        const id = Number(idStr);
+        const sale = await (await import("../../server/services/salesService")).updateSaleFromBody(id, body);
+        return json(200, sale);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          return json(400, { message: err.message });
+        }
+        return json(404, { message: "Sale not found" });
+      }
     }
 
     if (method === "POST" && path === api.sales.create.path) {
       try {
-        const rawData = { ...body };
-        const itemId = Number(rawData.itemId);
-        const quantity = Number(rawData.quantity);
-        const unitPrice = Number(rawData.unitPrice);
-        const total = Number(rawData.total);
-        let date: Date;
-        if (rawData.date) {
-          date = new Date(rawData.date);
-          if (isNaN(date.getTime())) date = new Date();
-        } else {
-          date = new Date();
-        }
-        const input = api.sales.create.input.parse({
-          ...rawData,
-          itemId,
-          quantity,
-          unitPrice,
-          total,
-          date,
-          labels: rawData.labels || [],
-        });
-        const sale = await storage.createSale(input);
+        const sale = await createSaleFromBody(body);
         return json(201, sale);
       } catch (err) {
         if (err instanceof z.ZodError) {
           return json(400, {
             message:
               "Validation error: " +
-              err.errors
-                .map((e) => `${e.path.join(".")}: ${e.message}`)
-                .join(", "),
+              err.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", "),
           });
         }
         return json(500, { message: "Internal server error" });
@@ -145,18 +175,13 @@ export const handler: Handler = async (event) => {
 
     if (method === "GET" && path === api.stock.list.path) {
       const date = qp.date ? new Date(qp.date) : new Date();
-      const stocks = await storage.getStock(date);
+      const stocks = await listStock(date);
       return json(200, stocks);
     }
 
     if (method === "POST" && path === api.stock.transaction.path) {
       try {
-        const input = api.stock.transaction.input.parse({
-          ...body,
-          itemId: Number(body.itemId),
-          quantity: Number(body.quantity),
-        });
-        const stock = await storage.recordStockTransaction(input);
+        const stock = await recordStockTransactionFromBody(body);
         return json(200, stock);
       } catch (err) {
         if (err instanceof z.ZodError) {
@@ -168,55 +193,21 @@ export const handler: Handler = async (event) => {
 
     if (method === "GET" && path === api.dashboard.stats.path) {
       const range = (qp.range as any) || undefined;
-      const stats = await storage.getDashboardStats(range);
+      const stats = await getDashboardStats(range);
+      return json(200, stats);
+    }
+
+    if (method === "GET" && path === api.dashboard.profit.path) {
+      const range = (qp.range as any) || undefined;
+      const stats = await getProfit(range);
       return json(200, stats);
     }
 
     if (method === "GET" && path === api.dashboard.export.path) {
       try {
-        const from = qp.from ? new Date(qp.from) : new Date();
-        const to = qp.to ? new Date(qp.to) : new Date();
-        const data = await storage.getExportData(from, to);
-        let content = "EXECUTIVE SUMMARY\n";
-        content += `Report Period,${from.toLocaleDateString()} to ${to.toLocaleDateString()}\n`;
-        content += `Total Revenue,NPR ${(data.summary.totalRevenue / 100).toFixed(2)}\n`;
-        content += `Total Items Sold,${data.summary.totalItemsSold}\n`;
-        content += `Average Order Value,NPR ${(data.summary.averageOrderValue / 100).toFixed(2)}\n`;
-        content += `Top Performing Category,${data.summary.topCategory}\n`;
-        content += `Total Stock Wastage,${data.summary.wastageTotal} units\n\n`;
-        content += "SALES BY ITEM SUMMARY\n";
-        content += "Item,Total Quantity,Total Revenue (NPR)\n";
-        const itemStats: Record<string, { qty: number; total: number }> = {};
-        data.sales.forEach((s) => {
-          if (!itemStats[s.item.name]) itemStats[s.item.name] = { qty: 0, total: 0 };
-          itemStats[s.item.name].qty += s.quantity;
-          itemStats[s.item.name].total += s.total;
-        });
-        Object.entries(itemStats).forEach(([name, stats]) => {
-          content += `"${name}",${stats.qty},${(stats.total / 100).toFixed(2)}\n`;
-        });
-        content += "\n";
-        content += "SALES BY LABEL SUMMARY\n";
-        content += "Label,Total Quantity,Total Revenue (NPR)\n";
-        const summaryLabelStats: Record<string, { qty: number; total: number }> = {};
-        data.sales.forEach((s) => {
-          const labels = s.labels || [];
-          labels.forEach((l: string) => {
-            if (!summaryLabelStats[l]) summaryLabelStats[l] = { qty: 0, total: 0 };
-            summaryLabelStats[l].qty += s.quantity;
-            summaryLabelStats[l].total += s.total;
-          });
-        });
-        Object.entries(summaryLabelStats).forEach(([label, stats]) => {
-          content += `"${label}",${stats.qty},${(stats.total / 100).toFixed(2)}\n`;
-        });
-        content += "\n";
-        content += "DETAILED SALES REPORT\n";
-        content += "ID,Date,Item,Category,Quantity,Unit Cost (NPR),Selling Price (NPR),Labels,Total (NPR)\n";
-        data.sales.forEach((s) => {
-          content += `${s.id},${s.date.toLocaleDateString()},"${s.item.name}",${s.item.category},${s.quantity},${(s.item.costPrice / 100).toFixed(2)},${(s.unitPrice / 100).toFixed(2)},"${(s.labels || []).join(", ")}",${(s.total / 100).toFixed(2)}\n`;
-        });
-        const filename = `cafe_report_${from.toISOString().split("T")[0]}.csv`;
+        const from = qp.from ? new Date(`${qp.from}T00:00:00`) : new Date();
+        const to = qp.to ? new Date(`${qp.to}T00:00:00`) : new Date();
+        const { filename, content } = await getExportCSV(from, to);
         return csv(200, filename, content);
       } catch {
         return json(500, { message: "Failed to generate report" });
@@ -224,23 +215,14 @@ export const handler: Handler = async (event) => {
     }
 
     if (method === "GET" && path === api.dashboard.get_targets.path) {
-      const weekly = await storage.getSetting("target_weekly");
-      const monthly = await storage.getSetting("target_monthly");
-      const quarterly = await storage.getSetting("target_quarterly");
-      return json(200, {
-        weekly: Number(weekly) || 1550000,
-        monthly: Number(monthly) || 6670000,
-        quarterly: Number(quarterly) || 20000000,
-      });
+      const targets = await getTargets();
+      return json(200, targets);
     }
 
     if (method === "POST" && path === api.dashboard.update_targets.path) {
       try {
-        const input = api.dashboard.update_targets.input.parse(body);
-        await storage.setSetting("target_weekly", input.weekly.toString());
-        await storage.setSetting("target_monthly", input.monthly.toString());
-        await storage.setSetting("target_quarterly", input.quarterly.toString());
-        return json(200, { message: "Targets updated successfully" });
+        const result = await updateTargetsFromBody(body);
+        return json(200, result);
       } catch (err) {
         if (err instanceof z.ZodError) {
           return json(400, { message: err.message });
@@ -250,62 +232,67 @@ export const handler: Handler = async (event) => {
     }
 
     if (method === "GET" && path === api.dashboard.labels.path) {
-      const configuredLabels = await storage.getSetting("configured_labels");
-      const labels = configuredLabels ? JSON.parse(configuredLabels) : [];
-      const uniqueLabels = await storage.getUniqueLabels();
-      const merged = Array.from(new Set([...(labels as string[]), ...uniqueLabels]));
+      const merged = await getMergedLabels();
       return json(200, merged);
     }
 
     if (method === "GET" && path === "/api/config/labels") {
-      const labelsStr = await storage.getSetting("configured_labels");
-      return json(200, labelsStr ? JSON.parse(labelsStr) : []);
-    }
-
-    if (method === "POST" && path === "/api/config/labels") {
-      const label = body.label;
-      if (!label) return json(400, { message: "Label required" });
-      const labelsStr = await storage.getSetting("configured_labels");
-      let labels = labelsStr ? JSON.parse(labelsStr) : [];
-      if (!labels.includes(label)) {
-        labels.push(label);
-        await storage.setSetting("configured_labels", JSON.stringify(labels));
-      }
+      const labels = await getConfiguredLabels();
       return json(200, labels);
     }
 
+    if (method === "POST" && path === "/api/config/labels") {
+      try {
+        const labels = await addLabel(body.label);
+        return json(200, labels);
+      } catch (err) {
+        return json(400, { message: (err as any)?.message || "Label required" });
+      }
+    }
+
     if (method === "DELETE" && path === "/api/config/labels") {
-      const label = body.label;
-      const labelsStr = await storage.getSetting("configured_labels");
-      let labels = labelsStr ? JSON.parse(labelsStr) : [];
-      labels = labels.filter((l: string) => l !== label);
-      await storage.setSetting("configured_labels", JSON.stringify(labels));
+      const labels = await removeLabel(body.label);
       return json(200, labels);
     }
 
     if (method === "GET" && path === "/api/config/categories") {
-      const catsStr = await storage.getSetting("configured_categories");
-      return json(200, catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"]);
-    }
-
-    if (method === "POST" && path === "/api/config/categories") {
-      const category = body.category;
-      if (!category) return json(400, { message: "Category required" });
-      const catsStr = await storage.getSetting("configured_categories");
-      let cats = catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"];
-      if (!cats.includes(category)) {
-        cats.push(category);
-        await storage.setSetting("configured_categories", JSON.stringify(cats));
-      }
+      const cats = await getConfiguredCategories();
       return json(200, cats);
     }
 
+    if (method === "POST" && path === "/api/config/categories") {
+      try {
+        const cats = await addCategory(body.category);
+        return json(200, cats);
+      } catch (err) {
+        return json(400, { message: (err as any)?.message || "Category required" });
+      }
+    }
+
     if (method === "DELETE" && path === "/api/config/categories") {
-      const category = body.category;
-      const catsStr = await storage.getSetting("configured_categories");
-      let cats = catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"];
-      cats = cats.filter((c: string) => c !== category);
-      await storage.setSetting("configured_categories", JSON.stringify(cats));
+      const cats = await removeCategory(body.category);
+      return json(200, cats);
+    }
+
+    if (method === "GET" && path === "/api/config/expense-categories") {
+      const cats = await getExpenseCategories();
+      return json(200, cats);
+    }
+
+    if (method === "POST" && path === "/api/config/expense-categories") {
+      try {
+        const cats = await addExpenseCategory(body.category);
+        return json(200, cats);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          return json(400, { message: err.message });
+        }
+        throw err;
+      }
+    }
+
+    if (method === "DELETE" && path === "/api/config/expense-categories") {
+      const cats = await removeExpenseCategory(body.category);
       return json(200, cats);
     }
 
@@ -314,4 +301,3 @@ export const handler: Handler = async (event) => {
     return json(500, { message: err?.message || "Internal Server Error" });
   }
 };
-

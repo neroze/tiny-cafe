@@ -1,12 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type InsertSale } from "@shared/routes";
+import { api } from "@shared/routes";
 
-export function useSales(params?: { date?: string; limit?: string }) {
+export function useSales(params?: { date?: string; from?: string; to?: string; limit?: string }) {
   return useQuery({
     queryKey: [api.sales.list.path, params],
     queryFn: async () => {
       const searchParams = new URLSearchParams();
       if (params?.date) searchParams.set("date", params.date);
+      if (params?.from) searchParams.set("from", params.from);
+      if (params?.to) searchParams.set("to", params.to);
       if (params?.limit) searchParams.set("limit", params.limit);
       
       const url = `${api.sales.list.path}?${searchParams.toString()}`;
@@ -50,6 +52,29 @@ export function useCreateSale() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.sales.list.path] });
       queryClient.invalidateQueries({ queryKey: [api.dashboard.stats.path] });
+      queryClient.invalidateQueries({ queryKey: [api.stock.list.path] });
+    },
+  });
+}
+
+export function useUpdateSale() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...updates }: { id: number } & Partial<any>) => {
+      const res = await fetch(api.sales.update.path.replace(":id", String(id)), {
+        method: api.sales.update.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        if (res.status === 400) throw new Error((await res.json())?.message || "Validation error");
+        throw new Error("Failed to update sale");
+      }
+      return api.sales.update.responses[200].parse(await res.json());
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.sales.list.path] });
       queryClient.invalidateQueries({ queryKey: [api.stock.list.path] });
     },
   });

@@ -9,6 +9,7 @@ import Dashboard from "@/pages/dashboard";
 import SalesEntry from "@/pages/sales";
 import MenuItems from "@/pages/menu";
 import StockManagement from "@/pages/stock";
+import ExpensesPage from "@/pages/expenses";
 
 function Router() {
   return (
@@ -17,6 +18,7 @@ function Router() {
       <Route path="/sales" component={SalesEntry} />
       <Route path="/menu" component={MenuItems} />
       <Route path="/stock" component={StockManagement} />
+      <Route path="/expenses" component={ExpensesPage} />
       <Route component={NotFound} />
     </Switch>
   );
