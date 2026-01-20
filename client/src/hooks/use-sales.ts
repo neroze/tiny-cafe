@@ -45,7 +45,7 @@ export function useCreateSale() {
           const error = api.sales.create.responses[400].parse(await res.json());
           throw new Error(error.message);
         }
-        throw new Error("Failed to record sale");
+        throw new Error("Failed to record sale \n may be out of stock");
       }
       return api.sales.create.responses[201].parse(await res.json());
     },

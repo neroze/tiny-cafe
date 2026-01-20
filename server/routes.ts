@@ -9,6 +9,7 @@ import { listSales, createSaleFromBody } from "./services/salesService";
 import { listStock, recordStockTransactionFromBody } from "./services/stockService";
 import { getDashboardStats, getProfit, getExportCSV, getTargets, updateTargetsFromBody } from "./services/dashboardService";
 import { getMergedLabels, getConfiguredLabels, addLabel, removeLabel, getConfiguredCategories, addCategory, removeCategory } from "./services/configService";
+import { getRecipeByMenuItem, upsertRecipeFromBody, deleteRecipeForMenuItem } from "./services/recipeService";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -134,6 +135,32 @@ export async function registerRoutes(
     const date = req.query.date ? new Date(req.query.date as string) : new Date();
     const stocks = await listStock(date);
     res.json(stocks);
+  });
+
+  // Recipes
+  app.get(api.recipes.getByMenuItem.path, async (req, res) => {
+    const menuItemId = Number(req.params.menuItemId);
+    const recipe = await getRecipeByMenuItem(menuItemId);
+    res.json(recipe);
+  });
+
+  app.post(api.recipes.upsert.path, async (req, res) => {
+    try {
+      const result = await upsertRecipeFromBody(req.body);
+      res.status(201).json(result);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      return res.status(400).json({ message: (err as any)?.message || "Failed to save recipe" });
+    }
+  });
+
+  app.delete(api.recipes.delete.path, async (req, res) => {
+    try {
+      await deleteRecipeForMenuItem(Number(req.params.menuItemId));
+      res.status(204).send();
+    } catch (err) {
+      return res.status(400).json({ message: (err as any)?.message || "Failed to delete recipe" });
+    }
   });
 
   app.post(api.stock.transaction.path, async (req, res) => {

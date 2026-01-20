@@ -13,6 +13,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { href: "/menu", label: "Menu Items", icon: Coffee },
     { href: "/stock", label: "Inventory", icon: Package },
     { href: "/expenses", label: "Expenses", icon: Receipt },
+    { href: "/recipes", label: "Recipes (BOM)", icon: MenuIcon },
   ];
 
   return (
