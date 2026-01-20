@@ -269,6 +269,7 @@ export const api = {
     getByMenuItem: {
       method: 'GET' as const,
       path: '/api/recipes/:menuItemId',
+      
       responses: {
         200: z.object({
           id: z.number(),
