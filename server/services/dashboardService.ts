@@ -13,9 +13,9 @@ export async function getExportCSV(from: Date, to: Date) {
   const data = await storage.getExportData(from, to);
   let content = "EXECUTIVE SUMMARY\n";
   content += `Report Period,${from.toLocaleDateString()} to ${to.toLocaleDateString()}\n`;
-  content += `Total Revenue,NPR ${(data.summary.totalRevenue / 100).toFixed(2)}\n`;
+  content += `Total Revenue,NPR ${data.summary.totalRevenue.toFixed(2)}\n`;
   content += `Total Items Sold,${data.summary.totalItemsSold}\n`;
-  content += `Average Order Value,NPR ${(data.summary.averageOrderValue / 100).toFixed(2)}\n`;
+  content += `Average Order Value,NPR ${data.summary.averageOrderValue.toFixed(2)}\n`;
   content += `Top Performing Category,${data.summary.topCategory}\n`;
   content += `Total Stock Wastage,${data.summary.wastageTotal} units\n\n`;
   content += "SALES BY ITEM SUMMARY\n";
@@ -27,7 +27,7 @@ export async function getExportCSV(from: Date, to: Date) {
     itemStats[s.item.name].total += s.total;
   });
   Object.entries(itemStats).forEach(([name, stats]) => {
-    content += `"${name}",${stats.qty},${(stats.total / 100).toFixed(2)}\n`;
+    content += `"${name}",${stats.qty},${stats.total.toFixed(2)}\n`;
   });
   content += "\n";
   content += "SALES BY LABEL SUMMARY\n";
@@ -42,13 +42,13 @@ export async function getExportCSV(from: Date, to: Date) {
     });
   });
   Object.entries(summaryLabelStats).forEach(([label, stats]) => {
-    content += `"${label}",${stats.qty},${(stats.total / 100).toFixed(2)}\n`;
+    content += `"${label}",${stats.qty},${stats.total.toFixed(2)}\n`;
   });
   content += "\n";
   content += "DETAILED SALES REPORT\n";
   content += "ID,Date,Item,Category,Quantity,Unit Cost (NPR),Selling Price (NPR),Labels,Total (NPR)\n";
   data.sales.forEach((s) => {
-    content += `${s.id},${s.date.toLocaleDateString()},"${s.item.name}",${s.item.category},${s.quantity},${(s.item.costPrice / 100).toFixed(2)},${(s.unitPrice / 100).toFixed(2)},"${(s.labels || []).join(", ")}",${(s.total / 100).toFixed(2)}\n`;
+    content += `${s.id},${s.date.toLocaleDateString()},"${s.item.name}",${s.item.category},${s.quantity},${Number(s.item.costPrice).toFixed(2)},${Number(s.unitPrice).toFixed(2)},"${(s.labels || []).join(", ")}",${Number(s.total).toFixed(2)}\n`;
   });
   const filename = `cafe_report_${from.toISOString().split("T")[0]}.csv`;
   return { filename, content };
@@ -59,9 +59,9 @@ export async function getTargets() {
   const monthly = await storage.getSetting("target_monthly");
   const quarterly = await storage.getSetting("target_quarterly");
   return {
-    weekly: Number(weekly) || 1550000,
-    monthly: Number(monthly) || 6670000,
-    quarterly: Number(quarterly) || 20000000,
+    weekly: Number(weekly) || 15500,
+    monthly: Number(monthly) || 66700,
+    quarterly: Number(quarterly) || 200000,
   };
 }
 
@@ -72,4 +72,3 @@ export async function updateTargetsFromBody(body: any) {
   await storage.setSetting("target_quarterly", input.quarterly.toString());
   return { message: "Targets updated successfully" };
 }
-

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Layout } from "@/components/layout";
 import { PageHeader, Button, Input, Select, Card } from "@/components/ui-components";
 import { useItems, useCreateItem, useUpdateItem, useDeleteItem } from "@/hooks/use-items";
+import { useRecipe, useUpsertRecipe } from "@/hooks/use-recipes";
+import { useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Edit2, Trash2, X, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -74,6 +76,7 @@ export default function MenuItems() {
 function ItemCard({ item, onEdit }: { item: any, onEdit: () => void }) {
   const { toast } = useToast();
   const deleteItem = useDeleteItem();
+  const [recipeOpen, setRecipeOpen] = useState(false);
 
   const handleDelete = async () => {
     if (confirm("Are you sure you want to delete this item?")) {
@@ -95,6 +98,9 @@ function ItemCard({ item, onEdit }: { item: any, onEdit: () => void }) {
         <button onClick={handleDelete} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-colors">
           <Trash2 className="w-4 h-4" />
         </button>
+        <button onClick={() => setRecipeOpen(true)} className="p-2 bg-secondary rounded-lg hover:bg-primary hover:text-white transition-colors">
+          <Plus className="w-4 h-4" />
+        </button>
       </div>
 
       <span className="inline-block px-3 py-1 bg-secondary text-xs font-bold uppercase tracking-wider rounded-full mb-3 text-muted-foreground">
@@ -113,6 +119,9 @@ function ItemCard({ item, onEdit }: { item: any, onEdit: () => void }) {
           <p className="text-sm font-medium text-muted-foreground">NPR {Number(item.costPrice).toLocaleString()}</p>
         </div>
       </div>
+      {recipeOpen && (
+        <RecipeDialog open={recipeOpen} onOpenChange={setRecipeOpen} menuItem={item} />
+      )}
     </div>
   );
 }
@@ -189,6 +198,11 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
             </div>
           </div>
 
+          <div className="flex items-center gap-2">
+            <input type="checkbox" name="isIngredient" defaultChecked={initialData?.isIngredient} />
+            <span className="text-sm">Treat this item as inventory ingredient</span>
+          </div>
+
           <div>
             <label className="block text-sm font-medium mb-1">Min Stock Warning</label>
             <Input name="minStock" type="number" defaultValue={initialData?.minStock || 10} />
@@ -201,6 +215,107 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
             </Button>
           </div>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RecipeDialog({ open, onOpenChange, menuItem }: { open: boolean; onOpenChange: (v: boolean) => void; menuItem: any }) {
+  const { data: items = [] } = useItems();
+  const { data: recipe } = useRecipe(menuItem.id);
+  const saveRecipe = useUpsertRecipe();
+  const { toast } = useToast();
+  const inventoryItems = items.filter(i => i.isIngredient);
+  const [rows, setRows] = useState<{ ingredientId: number; quantity: number; unit: string }[]>(
+    recipe?.ingredients?.map((i: any) => ({ ingredientId: i.ingredientId, quantity: Number(i.quantity), unit: i.unit })) || []
+  );
+  const missingItems = inventoryItems.length > 0 ? items.filter(i => rows.some(r => r.ingredientId === i.id) && !i.isIngredient) : [];
+  const ingredientOptions = [...inventoryItems, ...missingItems];
+  useEffect(() => {
+    if (recipe?.ingredients) {
+      setRows(recipe.ingredients.map((i: any) => ({
+        ingredientId: i.ingredientId,
+        quantity: Number(i.quantity),
+        unit: i.unit,
+      })));
+    }
+  }, [recipe]);
+  const addRow = () => {
+    const selectedIds = new Set(rows.map(r => r.ingredientId));
+    const baseOptions = inventoryItems.length > 0 ? inventoryItems : items;
+    const firstAvailable = baseOptions.find(i => !selectedIds.has(i.id)) || baseOptions[0];
+    setRows([...rows, { ingredientId: firstAvailable?.id || 0, quantity: 1, unit: firstAvailable?.unit || "pcs" }]);
+  };
+  const updateRow = (idx: number, patch: Partial<{ ingredientId: number; quantity: number; unit: string }>) => {
+    const next = [...rows];
+    next[idx] = { ...next[idx], ...patch };
+    setRows(next);
+  };
+  const removeRow = (idx: number) => setRows(rows.filter((_, i) => i !== idx));
+  const costPreview = rows.reduce((sum, r) => {
+    const ing = inventoryItems.find(i => i.id === r.ingredientId);
+    const costPerUnit = ing ? Number(ing.costPrice) : 0;
+    return sum + (Number(r.quantity) * costPerUnit);
+  }, 0);
+  const warn = costPreview > Number(menuItem.sellingPrice);
+  const handleSave = async () => {
+    try {
+      await saveRecipe.mutateAsync({ menuItemId: menuItem.id, ingredients: rows });
+      toast({ title: "Recipe saved" });
+      onOpenChange(false);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error", description: e.message });
+    }
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-background sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl">Recipe for {menuItem.name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {rows.map((r, idx) => (
+            <div key={idx} className="grid grid-cols-12 gap-2 items-end">
+              <div className="col-span-5">
+                <label className="block text-xs mb-1">Ingredient</label>
+                <Select value={String(r.ingredientId)} onChange={e => updateRow(idx, { ingredientId: Number(e.target.value), unit: ingredientOptions.find(i => i.id === Number(e.target.value))?.unit || "pcs" })}>
+                  {ingredientOptions.map(i => (
+                    <option key={i.id} value={i.id} disabled={!i.isIngredient}>
+                      {i.name} ({i.unit || "pcs"}){!i.isIngredient ? " • not inventory" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="col-span-3">
+                <label className="block text-xs mb-1">Quantity per unit</label>
+                <Input type="number" step="0.001" value={r.quantity} onChange={e => updateRow(idx, { quantity: Number(e.target.value) })} />
+              </div>
+              <div className="col-span-3">
+                <label className="block text-xs mb-1">Unit</label>
+                <Select value={r.unit} onChange={e => updateRow(idx, { unit: e.target.value })}>
+                  {["ml","g","pcs"].map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </Select>
+              </div>
+              <div className="col-span-1">
+                <button onClick={() => removeRow(idx)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+          <div className="flex justify-between items-center">
+            <Button variant="outline" onClick={addRow}><Plus className="w-4 h-4 mr-2" /> Add Ingredient</Button>
+            <div className={`text-sm ${warn ? "text-red-500" : "text-muted-foreground"}`}>
+              Cost per unit: NPR {costPreview.toLocaleString()} {warn ? "(> selling price!)" : ""}
+            </div>
+          </div>
+        </div>
+        <div className="pt-4 flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={handleSave} isLoading={saveRecipe.isPending}>Save Recipe</Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

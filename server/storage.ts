@@ -1,11 +1,12 @@
 import { db } from "./db";
 import {
-  items, sales, stock, settings, expenses,
+  items, sales, stock, settings, expenses, recipes, recipeItems,
   type Item, type InsertItem,
   type Sale, type InsertSale,
   type Stock, type InsertStock,
   type Expense, type InsertExpense,
-  type CreateStockTransactionRequest
+  type CreateStockTransactionRequest,
+  type RecipeItem
 } from "@shared/schema";
 import { eq, sql, and, desc, sum, gte, lte } from "drizzle-orm";
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter } from "date-fns";
@@ -45,6 +46,11 @@ export interface IStorage {
   // Stock
   getStock(date?: Date): Promise<(Stock & { item: Item })[]>;
   recordStockTransaction(data: CreateStockTransactionRequest): Promise<Stock>;
+
+  // Recipes
+  getRecipeByMenuItem(menuItemId: number): Promise<{ id: number; menuItemId: number; ingredients: RecipeItem[] } | null>;
+  upsertRecipe(menuItemId: number, ingredients: { ingredientId: number; quantity: number; unit: string }[]): Promise<{ message: string }>;
+  deleteRecipe(menuItemId: number): Promise<void>;
 
   // Settings
   getSetting(key: string): Promise<string | undefined>;
@@ -150,7 +156,35 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createSale(insertSale: InsertSale): Promise<Sale> {
-    const [sale] = await db.insert(sales).values(insertSale).returning();
+    const recipe = await this.getRecipeByMenuItem(insertSale.itemId);
+    if (!recipe || recipe.ingredients.length === 0) {
+      throw new Error("Recipe required for this menu item");
+    }
+    const allowInsufficient = (await this.getSetting("allow_sale_without_stock")) === "true";
+    // Verify stock availability
+    for (const comp of recipe.ingredients) {
+      const needed = Math.round(Number(comp.quantity) * Number(insertSale.quantity));
+      const available = await this.getAvailableStock(comp.ingredientId, insertSale.date);
+      if (!allowInsufficient && available < needed) {
+        throw new Error(`Insufficient stock for ingredient ID ${comp.ingredientId}: need ${needed}, have ${available}`);
+      }
+    }
+    // Compute COGS
+    let saleCogs = 0;
+    for (const comp of recipe.ingredients) {
+      const [ing] = await db.select().from(items).where(eq(items.id, comp.ingredientId)).limit(1);
+      if (!ing) continue;
+      const perUnitCost = Number(ing.costPrice);
+      saleCogs += Number(comp.quantity) * perUnitCost;
+    }
+    saleCogs = saleCogs * Number(insertSale.quantity);
+    const [sale] = await db.insert(sales).values({ ...insertSale, cogs: String(saleCogs) }).returning();
+    // Deduct ingredient stock usage
+    for (const comp of recipe.ingredients) {
+      const useQty = Math.round(Number(comp.quantity) * Number(insertSale.quantity));
+      await this.consumeIngredient(comp.ingredientId, sale.date, useQty);
+    }
+    // Update sold count for the menu item itself
     await this.updateDailyStockSales(sale.itemId, sale.date, sale.quantity);
     return sale;
   }
@@ -292,6 +326,44 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  private async getAvailableStock(itemId: number, date: Date): Promise<number> {
+    const dayStart = startOfDay(date);
+    const dayEnd = endOfDay(date);
+    const existing = await db.select().from(stock)
+      .where(and(eq(stock.itemId, itemId), gte(stock.date, dayStart), lte(stock.date, dayEnd)))
+      .limit(1);
+    if (existing.length === 0) return 0;
+    const s = existing[0];
+    return (s.openingStock || 0) + (s.purchased || 0) - (s.sold || 0) - (s.wastage || 0);
+  }
+
+  private async consumeIngredient(itemId: number, date: Date, quantity: number): Promise<void> {
+    const dayStart = startOfDay(date);
+    const dayEnd = endOfDay(date);
+    const existing = await db.select().from(stock)
+      .where(and(eq(stock.itemId, itemId), gte(stock.date, dayStart), lte(stock.date, dayEnd)))
+      .limit(1);
+    if (existing.length > 0) {
+      const current = existing[0];
+      await db.update(stock)
+        .set({
+          sold: (current.sold || 0) + quantity,
+          closingStock: (current.openingStock || 0) + (current.purchased || 0) - ((current.sold || 0) + quantity) - (current.wastage || 0)
+        })
+        .where(eq(stock.id, current.id));
+    } else {
+      await db.insert(stock).values({
+        itemId,
+        date,
+        openingStock: 0,
+        purchased: 0,
+        sold: quantity,
+        wastage: 0,
+        closingStock: 0 - quantity
+      });
+    }
+  }
+
   async getDashboardStats(range: 'weekly' | 'monthly' | 'quarterly' = 'weekly') {
     const now = new Date();
     let startDate: Date;
@@ -379,7 +451,7 @@ export class DatabaseStorage implements IStorage {
 
     const labelDistribution = Array.from(labelDistributionMap.entries()).map(([name, value]) => ({
       name,
-      value: value / 100 // Convert to NPR
+      value
     })).sort((a, b) => b.value - a.value);
 
     return {
@@ -592,14 +664,13 @@ export class DatabaseStorage implements IStorage {
       date: sales.date,
       quantity: sales.quantity,
       total: sales.total,
-      costPrice: items.costPrice,
+      cogs: sales.cogs,
     })
       .from(sales)
-      .innerJoin(items, eq(sales.itemId, items.id))
       .where(and(gte(sales.date, start), lte(sales.date, end)));
 
     const totalSales = salesRows.reduce((sum, r) => sum + Number(r.total), 0);
-    const totalCOGS = salesRows.reduce((sum, r) => sum + Number(r.quantity) * Number(r.costPrice), 0);
+    const totalCOGS = salesRows.reduce((sum, r) => sum + Number(r.cogs || 0), 0);
     const grossProfit = totalSales - totalCOGS;
 
     const expensesAgg = await this.getExpenses(start, end);
@@ -616,7 +687,7 @@ export class DatabaseStorage implements IStorage {
       const dEnd = endOfDay(day);
       const dSales = salesRows.filter(r => r.date >= dStart && r.date <= dEnd);
       const dSalesTotal = dSales.reduce((s, r) => s + Number(r.total), 0);
-      const dCOGS = dSales.reduce((s, r) => s + Number(r.quantity) * Number(r.costPrice), 0);
+      const dCOGS = dSales.reduce((s, r) => s + Number(r.cogs || 0), 0);
       const dExpenses = expensesAgg.items.reduce((s, e) => {
         if (e.isRecurring) return s + (e.allocatedDaily || 0);
         return s + (e.date >= dStart && e.date <= dEnd ? e.amount : 0);
@@ -651,6 +722,49 @@ export class DatabaseStorage implements IStorage {
       trend,
       alerts: { consecutiveNetLossDays, expenseSpike },
     };
+  }
+
+  async getRecipeByMenuItem(menuItemId: number): Promise<{ id: number; menuItemId: number; ingredients: RecipeItem[] } | null> {
+    const [rec] = await db.select().from(recipes).where(eq(recipes.menuItemId, menuItemId)).limit(1);
+    if (!rec) return null;
+    const comps = await db.select().from(recipeItems).where(eq(recipeItems.recipeId, rec.id));
+    return { id: rec.id, menuItemId: rec.menuItemId, ingredients: comps as any };
+  }
+
+  async upsertRecipe(menuItemId: number, ingredients: { ingredientId: number; quantity: number; unit: string }[]): Promise<{ message: string }> {
+    const existing = await db.select().from(recipes).where(eq(recipes.menuItemId, menuItemId)).limit(1);
+    let recipeId: number;
+    if (existing.length > 0) {
+      recipeId = existing[0].id;
+      await db.delete(recipeItems).where(eq(recipeItems.recipeId, recipeId));
+    } else {
+      const [created] = await db.insert(recipes).values({ menuItemId }).returning();
+      recipeId = created.id;
+    }
+    if (ingredients.length === 0) {
+      throw new Error("A menu item must have at least one ingredient");
+    }
+    await db.insert(recipeItems).values(ingredients.map(i => ({
+      recipeId,
+      ingredientId: i.ingredientId,
+      quantity: String(i.quantity),
+      unit: i.unit,
+    })));
+    return { message: "Recipe saved" };
+  }
+
+  async deleteRecipe(menuItemId: number): Promise<void> {
+    const salesCount = await db.select({ count: sql<number>`count(*)` })
+      .from(sales)
+      .where(eq(sales.itemId, menuItemId));
+    const count = Number(salesCount[0]?.count || 0);
+    if (count > 0) {
+      throw new Error("Recipe deletion is blocked: sales exist for this item");
+    }
+    const [rec] = await db.select().from(recipes).where(eq(recipes.menuItemId, menuItemId)).limit(1);
+    if (!rec) return;
+    await db.delete(recipeItems).where(eq(recipeItems.recipeId, rec.id));
+    await db.delete(recipes).where(eq(recipes.id, rec.id));
   }
 }
 

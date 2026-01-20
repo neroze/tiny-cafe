@@ -18,6 +18,7 @@ export async function createItemFromBody(body: any) {
     costPrice: Number(body?.costPrice),
     sellingPrice: Number(body?.sellingPrice),
     minStock: Number(body?.minStock || 0),
+    isIngredient: Boolean(body?.isIngredient),
   });
   return await storage.createItem(input);
 }
@@ -28,6 +29,7 @@ export async function updateItemFromBody(id: number, body: any) {
     costPrice: body.costPrice !== undefined ? Number(body.costPrice) : undefined,
     sellingPrice: body.sellingPrice !== undefined ? Number(body.sellingPrice) : undefined,
     minStock: body.minStock !== undefined ? Number(body.minStock) : undefined,
+    isIngredient: body.isIngredient !== undefined ? Boolean(body.isIngredient) : undefined,
   });
   return await storage.updateItem(id, input);
 }

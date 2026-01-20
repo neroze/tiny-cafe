@@ -265,6 +265,48 @@ export const api = {
       },
     },
   },
+  recipes: {
+    getByMenuItem: {
+      method: 'GET' as const,
+      path: '/api/recipes/:menuItemId',
+      responses: {
+        200: z.object({
+          id: z.number(),
+          menuItemId: z.number(),
+          ingredients: z.array(z.object({
+            id: z.number(),
+            ingredientId: z.number(),
+            quantity: z.coerce.number(),
+            unit: z.string(),
+          })),
+        }).nullable(),
+      },
+    },
+    upsert: {
+      method: 'POST' as const,
+      path: '/api/recipes',
+      input: z.object({
+        menuItemId: z.number(),
+        ingredients: z.array(z.object({
+          ingredientId: z.number(),
+          quantity: z.number(),
+          unit: z.string(),
+        })).min(1),
+      }),
+      responses: {
+        201: z.object({ message: z.string() }),
+        400: errorSchemas.validation,
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/recipes/:menuItemId',
+      responses: {
+        204: z.void(),
+        400: errorSchemas.validation,
+      },
+    },
+  },
 };
 
 export function buildUrl(path: string, params?: Record<string, string | number>): string {

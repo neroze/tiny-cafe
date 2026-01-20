@@ -7,6 +7,8 @@ export const items = pgTable("items", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   category: text("category").notNull(), // Snacks, Drinks, Main
+  unit: text("unit").default("pcs"),
+  isIngredient: boolean("is_ingredient").default(false),
   costPrice: integer("cost_price").notNull(), // in cents/paisa
   sellingPrice: integer("selling_price").notNull(), // in cents/paisa
   minStock: integer("min_stock").default(0),
@@ -21,6 +23,7 @@ export const sales = pgTable("sales", {
   quantity: integer("quantity").notNull(),
   unitPrice: integer("unit_price").notNull(), // Snapshot of price at sale time
   total: integer("total").notNull(),
+  cogs: decimal("cogs", { precision: 12, scale: 2 }).default("0"),
   labels: text("labels").array().default(sql`ARRAY[]::text[]`),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -48,6 +51,20 @@ export const expenses = pgTable("expenses", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const recipes = pgTable("recipes", {
+  id: serial("id").primaryKey(),
+  menuItemId: integer("menu_item_id").references(() => items.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const recipeItems = pgTable("recipe_items", {
+  id: serial("id").primaryKey(),
+  recipeId: integer("recipe_id").references(() => recipes.id).notNull(),
+  ingredientId: integer("ingredient_id").references(() => items.id).notNull(),
+  quantity: decimal("quantity", { precision: 12, scale: 3 }).notNull(),
+  unit: text("unit").notNull(), // ml, g, pcs
+});
+
 export const itemsRelations = relations(items, ({ many }) => ({
   sales: many(sales),
   stock: many(stock),
@@ -56,6 +73,25 @@ export const itemsRelations = relations(items, ({ many }) => ({
 export const salesRelations = relations(sales, ({ one }) => ({
   item: one(items, {
     fields: [sales.itemId],
+    references: [items.id],
+  }),
+}));
+
+export const recipesRelations = relations(recipes, ({ one, many }) => ({
+  menuItem: one(items, {
+    fields: [recipes.menuItemId],
+    references: [items.id],
+  }),
+  components: many(recipeItems),
+}));
+
+export const recipeItemsRelations = relations(recipeItems, ({ one }) => ({
+  recipe: one(recipes, {
+    fields: [recipeItems.recipeId],
+    references: [recipes.id],
+  }),
+  ingredient: one(items, {
+    fields: [recipeItems.ingredientId],
     references: [items.id],
   }),
 }));
@@ -80,6 +116,8 @@ export const insertStockSchema = createInsertSchema(stock, {
 export const insertExpenseSchema = createInsertSchema(expenses, {
   date: z.coerce.date(),
 }).omit({ id: true, createdAt: true });
+export const insertRecipeSchema = createInsertSchema(recipes).omit({ id: true, createdAt: true });
+export const insertRecipeItemSchema = createInsertSchema(recipeItems).omit({ id: true });
 
 // Types
 export type Item = typeof items.$inferSelect;
@@ -90,6 +128,10 @@ export type Stock = typeof stock.$inferSelect;
 export type InsertStock = z.infer<typeof insertStockSchema>;
 export type Expense = typeof expenses.$inferSelect;
 export type InsertExpense = z.infer<typeof insertExpenseSchema>;
+export type Recipe = typeof recipes.$inferSelect;
+export type InsertRecipe = z.infer<typeof insertRecipeSchema>;
+export type RecipeItem = typeof recipeItems.$inferSelect;
+export type InsertRecipeItem = z.infer<typeof insertRecipeItemSchema>;
 
 export type CreateSaleRequest = InsertSale;
 export type CreateStockTransactionRequest = {

@@ -102,18 +102,18 @@ export default function Dashboard() {
   React.useEffect(() => {
     if (targets) {
       setEditTargets({
-        weekly: targets.weekly / 100,
-        monthly: targets.monthly / 100,
-        quarterly: targets.quarterly / 100,
+        weekly: targets.weekly,
+        monthly: targets.monthly,
+        quarterly: targets.quarterly,
       });
     }
   }, [targets]);
 
   const handleUpdateTargets = () => {
     updateTargetsMutation.mutate({
-      weekly: Math.round(editTargets.weekly * 100),
-      monthly: Math.round(editTargets.monthly * 100),
-      quarterly: Math.round(editTargets.quarterly * 100),
+      weekly: editTargets.weekly,
+      monthly: editTargets.monthly,
+      quarterly: editTargets.quarterly,
     });
     setIsDialogOpen(false);
   };
@@ -128,7 +128,7 @@ export default function Dashboard() {
     );
   }
 
-  const formatCurrency = (val: number) => `NPR ${(val / 100).toLocaleString()}`;
+  const formatCurrency = (val: number) => `NPR ${val.toLocaleString()}`;
 
   const handleExport = () => {
     const url = `${api.dashboard.export.path}?from=${dateRange.from.toISOString()}&to=${dateRange.to.toISOString()}`;
@@ -149,13 +149,13 @@ export default function Dashboard() {
   const chartData = safeStats.topItems.map((item: any) => ({
     name: item.name,
     sales: item.quantity,
-    total: item.total / 100
+    total: item.total
   }));
 
   const trendData = safeStats.itemSalesTrend.map((t: any) => ({
     date: new Date(t.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     ...Object.fromEntries(
-      Object.entries(t.items).map(([name, total]) => [name, (total as number) / 100])
+      Object.entries(t.items).map(([name, total]) => [name, total as number])
     )
   }));
 
@@ -376,26 +376,26 @@ export default function Dashboard() {
           title="Weekly Sales"
           value={formatCurrency(safeStats.weeklySales)}
           icon={CalendarIcon}
-          target={targets?.weekly || 1550000}
+          target={targets?.weekly || 15500}
           current={safeStats.weeklySales}
-          description={`Target: NPR ${((targets?.weekly || 1550000) / 100).toLocaleString()}`}
+          description={`Target: NPR ${(targets?.weekly || 15500).toLocaleString()}`}
         />
         <StatsCard
           title="Monthly Sales"
           value={formatCurrency(safeStats.monthlySales)}
           icon={TrendingUp}
-          target={targets?.monthly || 6670000}
+          target={targets?.monthly || 66700}
           current={safeStats.monthlySales}
-          description={`Target: NPR ${((targets?.monthly || 6670000) / 100).toLocaleString()}`}
+          description={`Target: NPR ${(targets?.monthly || 66700).toLocaleString()}`}
           colorClass="text-accent"
         />
         <StatsCard
           title="Quarterly Sales"
           value={formatCurrency(safeStats.quarterlySales)}
           icon={Award}
-          target={targets?.quarterly || 20000000}
+          target={targets?.quarterly || 200000}
           current={safeStats.quarterlySales}
-          description={`Target: NPR ${((targets?.quarterly || 20000000) / 100).toLocaleString()}`}
+          description={`Target: NPR ${(targets?.quarterly || 200000).toLocaleString()}`}
           colorClass="text-purple-500"
         />
       </div>
@@ -501,7 +501,7 @@ export default function Dashboard() {
             </div>
             <div className="h-[300px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={profit.trend.map(t => ({ date: new Date(t.date).toLocaleDateString(), net: t.net / 100 }))}>
+                <LineChart data={profit.trend.map(t => ({ date: new Date(t.date).toLocaleDateString(), net: t.net }))}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                   <XAxis dataKey="date" axisLine={false} tickLine={false} />
                   <YAxis tickFormatter={(val) => `NPR ${val}`} axisLine={false} tickLine={false} />
