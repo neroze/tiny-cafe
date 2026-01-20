@@ -7,6 +7,7 @@ import { listSalesByQuery, createSaleFromBody } from "../../server/services/sale
 import { listStock, recordStockTransactionFromBody } from "../../server/services/stockService";
 import { getDashboardStats, getProfit, getExportCSV, getTargets, updateTargetsFromBody } from "../../server/services/dashboardService";
 import { getMergedLabels, getConfiguredLabels, addLabel, removeLabel, getConfiguredCategories, addCategory, removeCategory } from "../../server/services/configService";
+import { getRecipeByMenuItem, upsertRecipeFromBody, deleteRecipeForMenuItem } from "../../server/services/recipeService";
 
 function json(statusCode: number, data: any) {
   return {
@@ -294,6 +295,36 @@ export const handler: Handler = async (event) => {
     if (method === "DELETE" && path === "/api/config/expense-categories") {
       const cats = await removeExpenseCategory(body.category);
       return json(200, cats);
+    }
+
+    if (method === "GET" && path.startsWith("/api/recipes/")) {
+      const idStr = path.split("/").pop();
+      const menuItemId = Number(idStr);
+      const recipe = await getRecipeByMenuItem(menuItemId);
+      return json(200, recipe);
+    }
+
+    if (method === "POST" && path === api.recipes.upsert.path) {
+      try {
+        const result = await upsertRecipeFromBody(body);
+        return json(201, result);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          return json(400, { message: err.message });
+        }
+        return json(400, { message: (err as any)?.message || "Failed to save recipe" });
+      }
+    }
+
+    if (method === "DELETE" && path.startsWith("/api/recipes/")) {
+      try {
+        const idStr = path.split("/").pop();
+        const menuItemId = Number(idStr);
+        await deleteRecipeForMenuItem(menuItemId);
+        return { statusCode: 204, body: "" };
+      } catch (err) {
+        return json(400, { message: (err as any)?.message || "Failed to delete recipe" });
+      }
     }
 
     return json(404, { message: "Not found" });
