@@ -265,19 +265,19 @@ function TransactionDialog({ open, onOpenChange }: { open: boolean, onOpenChange
 
           <div>
             <label className="block text-sm font-medium mb-1">Item</label>
-            <div className="flex gap-2">
+            <div className="flex gap-1">
               <Select name="itemId" required className="flex-1">
                 <option value="">Select Inventory Item...</option>
                 {ingredients.map(item => (
                   <option key={item.id} value={item.id}>{item.name} ({item.unit || "pcs"})</option>
                 ))}
               </Select>
-              <Button type="button" variant="outline" onClick={() => setIsAddItemOpen(true)}>
+              {/* <Button type="button" variant="outline" onClick={() => setIsAddItemOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" /> Add Inventory
               </Button>
               <Button type="button" variant="outline" onClick={() => setIsManageOpen(true)}>
                 Manage
-              </Button>
+              </Button> */}
             </div>
             {ingredients.length === 0 && (
               <p className="text-xs text-muted-foreground mt-1">No inventory items yet. Add one using “Add Inventory”.</p>
@@ -357,14 +357,11 @@ function AddInventoryItemDialog({ open, onOpenChange }: { open: boolean; onOpenC
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className="col-span-2">
               <label className="block text-sm mb-1">Cost (NPR)</label>
               <Input name="costPrice" type="number" step="0.01" required />
             </div>
-            <div>
-              <label className="block text-sm mb-1">Selling Price (optional)</label>
-              <Input name="sellingPrice" type="number" step="0.01" defaultValue={0} />
-            </div>
+            <input type="hidden" name="sellingPrice" value="0" />
           </div>
           <div>
             <label className="block text-sm mb-1">Min Stock</label>

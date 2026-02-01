@@ -16,10 +16,12 @@ export default function MenuItems() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<InsertItem & { id?: number } | null>(null);
 
-  const filteredItems = items.filter(item => 
-    item.name.toLowerCase().includes(search.toLowerCase()) || 
-    item.category.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredItems = items
+    .filter(item => !item.isIngredient) // Strictly filter out inventory items from Menu
+    .filter(item => 
+      item.name.toLowerCase().includes(search.toLowerCase()) || 
+      item.category.toLowerCase().includes(search.toLowerCase())
+    );
 
   const openCreate = () => {
     setEditingItem(null);
@@ -98,9 +100,11 @@ function ItemCard({ item, onEdit }: { item: any, onEdit: () => void }) {
         <button onClick={handleDelete} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-colors">
           <Trash2 className="w-4 h-4" />
         </button>
-        <button onClick={() => setRecipeOpen(true)} className="p-2 bg-secondary rounded-lg hover:bg-primary hover:text-white transition-colors">
-          <Plus className="w-4 h-4" />
-        </button>
+        {!item.isIngredient && (
+          <button onClick={() => setRecipeOpen(true)} className="p-2 bg-secondary rounded-lg hover:bg-primary hover:text-white transition-colors">
+            <Plus className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <span className="inline-block px-3 py-1 bg-secondary text-xs font-bold uppercase tracking-wider rounded-full mb-3 text-muted-foreground">
@@ -119,7 +123,7 @@ function ItemCard({ item, onEdit }: { item: any, onEdit: () => void }) {
           <p className="text-sm font-medium text-muted-foreground">NPR {Number(item.costPrice).toLocaleString()}</p>
         </div>
       </div>
-      {recipeOpen && (
+      {!item.isIngredient && recipeOpen && (
         <RecipeDialog open={recipeOpen} onOpenChange={setRecipeOpen} menuItem={item} />
       )}
     </div>
@@ -146,6 +150,7 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
       costPrice: Number(formData.get("costPrice")),
       sellingPrice: Number(formData.get("sellingPrice")),
       minStock: Number(formData.get("minStock")),
+      isIngredient: formData.get("isIngredient") === "on",
     };
 
     try {
@@ -189,8 +194,9 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Cost (NPR)</label>
-              <Input name="costPrice" type="number" step="0.01" defaultValue={initialData?.costPrice} required />
+              <label className="block text-sm font-medium mb-1">Cost (Calculated)</label>
+              <Input type="number" step="0.01" value={initialData?.costPrice || 0} disabled className="bg-muted" />
+              <input type="hidden" name="costPrice" value={initialData?.costPrice || 0} />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Selling Price</label>
@@ -198,15 +204,8 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <input type="checkbox" name="isIngredient" defaultChecked={initialData?.isIngredient} />
-            <span className="text-sm">Treat this item as inventory ingredient</span>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Min Stock Warning</label>
-            <Input name="minStock" type="number" defaultValue={initialData?.minStock || 10} />
-          </div>
+          <input type="hidden" name="isIngredient" value="false" />
+          <input type="hidden" name="minStock" value="0" />
 
           <div className="pt-4 flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -229,8 +228,11 @@ function RecipeDialog({ open, onOpenChange, menuItem }: { open: boolean; onOpenC
   const [rows, setRows] = useState<{ ingredientId: number; quantity: number; unit: string }[]>(
     recipe?.ingredients?.map((i: any) => ({ ingredientId: i.ingredientId, quantity: Number(i.quantity), unit: i.unit })) || []
   );
-  const missingItems = inventoryItems.length > 0 ? items.filter(i => rows.some(r => r.ingredientId === i.id) && !i.isIngredient) : [];
+  const missingItems = items.filter(i => rows.some(r => r.ingredientId === i.id) && !i.isIngredient);
   const ingredientOptions = [...inventoryItems, ...missingItems];
+  
+  const canAdd = inventoryItems.length > 0;
+
   useEffect(() => {
     if (recipe?.ingredients) {
       setRows(recipe.ingredients.map((i: any) => ({
@@ -241,10 +243,15 @@ function RecipeDialog({ open, onOpenChange, menuItem }: { open: boolean; onOpenC
     }
   }, [recipe]);
   const addRow = () => {
+    if (!canAdd) return;
     const selectedIds = new Set(rows.map(r => r.ingredientId));
-    const baseOptions = inventoryItems.length > 0 ? inventoryItems : items;
+    // Prefer inventory items
+    const baseOptions = inventoryItems;
     const firstAvailable = baseOptions.find(i => !selectedIds.has(i.id)) || baseOptions[0];
-    setRows([...rows, { ingredientId: firstAvailable?.id || 0, quantity: 1, unit: firstAvailable?.unit || "pcs" }]);
+    
+    if (!firstAvailable) return;
+
+    setRows([...rows, { ingredientId: firstAvailable.id, quantity: 1, unit: firstAvailable.unit || "pcs" }]);
   };
   const updateRow = (idx: number, patch: Partial<{ ingredientId: number; quantity: number; unit: string }>) => {
     const next = [...rows];
@@ -306,11 +313,16 @@ function RecipeDialog({ open, onOpenChange, menuItem }: { open: boolean; onOpenC
             </div>
           ))}
           <div className="flex justify-between items-center">
-            <Button variant="outline" onClick={addRow}><Plus className="w-4 h-4 mr-2" /> Add Ingredient</Button>
+            <Button variant="outline" onClick={addRow} disabled={!canAdd}><Plus className="w-4 h-4 mr-2" /> Add Ingredient</Button>
             <div className={`text-sm ${warn ? "text-red-500" : "text-muted-foreground"}`}>
               Cost per unit: NPR {costPreview.toLocaleString()} {warn ? "(> selling price!)" : ""}
             </div>
           </div>
+          {!canAdd && rows.length === 0 && (
+            <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-md border border-amber-200">
+              No inventory items found. Please create items marked as "Ingredient" first.
+            </div>
+          )}
         </div>
         <div className="pt-4 flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

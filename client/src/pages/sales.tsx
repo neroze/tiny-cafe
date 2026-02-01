@@ -46,15 +46,17 @@ export default function SalesEntry() {
   }, [allAvailableLabels, currentLabel, labels]);
 
   // Queries
-  const { data: items = [] } = useItems();
+  const { data: allItems = [] } = useItems();
+  const menuItems = useMemo(() => allItems.filter(i => !i.isIngredient), [allItems]);
+  
   const { data: todaysSales = [], isLoading: isLoadingSales } = useSales({ date, limit: "50" });
   const createSale = useCreateSale();
   const updateSale = useUpdateSale();
 
   // Derived
   const selectedItem = useMemo(() => 
-    items.find(i => i.id === Number(itemId)), 
-    [items, itemId]
+    menuItems.find(i => i.id === Number(itemId)), 
+    [menuItems, itemId]
   );
   
   // Update price when item changes
@@ -166,7 +168,7 @@ export default function SalesEntry() {
                   required
                 >
                   <option value="">Select Item...</option>
-                  {items.map(item => (
+                  {menuItems.map(item => (
                     <option key={item.id} value={item.id}>
                       {item.name}
                     </option>
@@ -413,7 +415,7 @@ export default function SalesEntry() {
                               <label className="block text-sm mb-1 text-muted-foreground">Item</label>
                               <Select value={String(formEdit.itemId)} onChange={e => setFormEdit({ ...formEdit, itemId: Number(e.target.value) })}>
                                 <option value="">Select Item...</option>
-                                {items.map((item) => (
+                                {menuItems.map((item) => (
                                   <option key={item.id} value={item.id}>{item.name}</option>
                                 ))}
                               </Select>

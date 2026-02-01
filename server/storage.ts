@@ -8,7 +8,7 @@ import {
   type CreateStockTransactionRequest,
   type RecipeItem
 } from "@shared/schema";
-import { eq, sql, and, desc, sum, gte, lte } from "drizzle-orm";
+import { eq, sql, and, desc, sum, gte, lte, gt } from "drizzle-orm";
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter } from "date-fns";
 
 export interface IStorage {
@@ -184,8 +184,8 @@ export class DatabaseStorage implements IStorage {
       const useQty = Math.round(Number(comp.quantity) * Number(insertSale.quantity));
       await this.consumeIngredient(comp.ingredientId, sale.date, useQty);
     }
-    // Update sold count for the menu item itself
-    await this.updateDailyStockSales(sale.itemId, sale.date, sale.quantity);
+    // Update sold count for the menu item itself -> REMOVED per requirements (Menu items don't manage inventory)
+    // await this.updateDailyStockSales(sale.itemId, sale.date, sale.quantity);
     return sale;
   }
   
@@ -194,6 +194,10 @@ export class DatabaseStorage implements IStorage {
     const [existing] = await db.select().from(sales).where(eq(sales.id, id)).limit(1);
     if (!existing) throw new Error("Sale not found");
     const [updated] = await db.update(sales).set(updates).where(eq(sales.id, id)).returning();
+    
+    // TODO: Handle inventory adjustment for sale updates correctly. 
+    // Currently disabled to prevent pollution of stock table with menu items.
+    /*
     // Recalculate stock for old item/date and new item/date
     const oldItemId = existing.itemId;
     const oldDate = existing.date;
@@ -203,71 +207,101 @@ export class DatabaseStorage implements IStorage {
     if (oldItemId !== newItemId || startOfDay(oldDate).getTime() !== startOfDay(newDate).getTime()) {
       await this.recalcDailyStockSales(newItemId, newDate);
     }
+    */
     return updated;
   }
 
-  private async updateDailyStockSales(itemId: number, date: Date, quantity: number) {
+  // Helper to ensure continuous inventory
+  private async getOrInitDailyStock(itemId: number, date: Date): Promise<Stock> {
     const dayStart = startOfDay(date);
     const dayEnd = endOfDay(date);
     
-    const existing = await db.select().from(stock)
+    // Check for existing record
+    const [existing] = await db.select().from(stock)
       .where(and(eq(stock.itemId, itemId), gte(stock.date, dayStart), lte(stock.date, dayEnd)))
       .limit(1);
 
-    if (existing.length > 0) {
-      const current = existing[0];
-      await db.update(stock)
-        .set({ 
-          sold: (current.sold || 0) + quantity,
-          closingStock: (current.openingStock || 0) + (current.purchased || 0) - ((current.sold || 0) + quantity) - (current.wastage || 0)
-        })
-        .where(eq(stock.id, current.id));
-    } else {
-      await db.insert(stock).values({
-        itemId,
-        date: date,
-        openingStock: 0,
-        purchased: 0,
-        sold: quantity,
-        wastage: 0,
-        closingStock: 0 - quantity
-      });
-    }
-  }
-  
-  private async recalcDailyStockSales(itemId: number, date: Date) {
-    const dayStart = startOfDay(date);
-    const dayEnd = endOfDay(date);
-    const daySales = await db.select({ quantity: sales.quantity })
-      .from(sales)
-      .where(and(eq(sales.itemId, itemId), gte(sales.date, dayStart), lte(sales.date, dayEnd)));
-    const totalSold = daySales.reduce((sum, r) => sum + Number(r.quantity || 0), 0);
-    const existing = await db.select().from(stock)
-      .where(and(eq(stock.itemId, itemId), gte(stock.date, dayStart), lte(stock.date, dayEnd)))
+    // Find last record strictly before today to verify continuity
+    const [lastRecord] = await db.select().from(stock)
+      .where(and(eq(stock.itemId, itemId), lte(stock.date, dayStart))) // strictly before today
+      .orderBy(desc(stock.date))
       .limit(1);
-    if (existing.length > 0) {
-      const current = existing[0];
-      const newClosing = (current.openingStock || 0) + (current.purchased || 0) - totalSold - (current.wastage || 0);
-      await db.update(stock)
-        .set({ sold: totalSold, closingStock: newClosing })
-        .where(eq(stock.id, current.id));
-    } else {
-      await db.insert(stock).values({
-        itemId,
-        date,
-        openingStock: 0,
-        purchased: 0,
-        sold: totalSold,
-        wastage: 0,
-        closingStock: 0 - totalSold
-      });
+
+    const expectedOpening = lastRecord ? (lastRecord.closingStock || 0) : 0;
+      
+    if (existing) {
+      // SELF-HEALING: Verify continuity
+      // If existing opening stock doesn't match previous closing, fix it.
+      if (existing.openingStock !== expectedOpening) {
+        console.log(`Self-healing stock for item ${itemId} on ${date}: Opening ${existing.openingStock} -> ${expectedOpening}`);
+        const newClosing = expectedOpening + (existing.purchased || 0) - (existing.sold || 0) - (existing.wastage || 0);
+        
+        const [corrected] = await db.update(stock)
+          .set({ 
+            openingStock: expectedOpening,
+            closingStock: newClosing
+          })
+          .where(eq(stock.id, existing.id))
+          .returning();
+          
+        // Since we changed this record, we must propagate changes to future records
+        await this.propagateStockChanges(itemId, date);
+        
+        return corrected;
+      }
+      return existing;
     }
+
+    // No record for today, create new one
+    const [newRecord] = await db.insert(stock).values({
+      itemId,
+      date,
+      openingStock: expectedOpening,
+      purchased: 0,
+      sold: 0,
+      wastage: 0,
+      closingStock: expectedOpening
+    }).returning();
+
+    return newRecord;
   }
+
+  // Deprecated: updateDailyStockSales (Removed usage)
+  // Deprecated: recalcDailyStockSales (Removed usage)
 
   async getStock(date?: Date): Promise<(Stock & { item: Item })[]> {
     const d = date || new Date();
     const start = startOfDay(d);
     const end = endOfDay(d);
+
+    // If specific date requested, use getOrInitDailyStock to ensure it exists
+    if (date) {
+      // For specific date view, we need to ensure records exist for all items? 
+      // Or just return what exists? The user might want to see "Today's Stock" even if no transaction happened today.
+      // But creating records for ALL items every time someone views stock is expensive.
+      // Better: Return existing records, but if the user wants "Today's Stock", the frontend might expect something.
+      // However, for now, let's just return what exists, but we can potentially "fill in" gaps on the fly if needed.
+      // But standard `getStock` usually just lists table.
+      // The issue: "Yesterday's Closing = Today's Opening".
+      // If I view stock for Today, and I haven't sold anything, I expect to see Yesterday's closing.
+      // But `db.select` won't return anything if no row exists.
+      
+      // Let's rely on the frontend to handle "missing" rows? 
+      // No, the user said "System should derive it".
+      // So if I query `getStock(today)`, I should get rows for all active items, populated with rolled-over values.
+      
+      const allItems = await this.getItems();
+      const inventoryItems = allItems.filter(i => i.isIngredient);
+      
+      const results: (Stock & { item: Item })[] = [];
+      
+      for (const item of inventoryItems) {
+         // This creates the record if missing, ensuring continuity
+         const record = await this.getOrInitDailyStock(item.id, d);
+         results.push({ ...record, item });
+      }
+      return results;
+    }
 
     return await db.select({
       id: stock.id,
@@ -288,23 +322,9 @@ export class DatabaseStorage implements IStorage {
 
   async recordStockTransaction(data: CreateStockTransactionRequest): Promise<Stock> {
     const date = data.date ? new Date(data.date) : new Date();
-    const start = startOfDay(date);
-    const end = endOfDay(date);
-
-    let [record] = await db.select().from(stock)
-      .where(and(eq(stock.itemId, data.itemId), gte(stock.date, start), lte(stock.date, end)));
-
-    if (!record) {
-      [record] = await db.insert(stock).values({
-        itemId: data.itemId,
-        date: date,
-        openingStock: 0,
-        purchased: 0,
-        sold: 0,
-        wastage: 0,
-        closingStock: 0
-      }).returning();
-    }
+    
+    // Use helper to get or init record with correct opening stock
+    const record = await this.getOrInitDailyStock(data.itemId, date);
 
     const updates: Partial<Stock> = {};
     if (data.type === 'purchase') {
@@ -312,6 +332,7 @@ export class DatabaseStorage implements IStorage {
     } else if (data.type === 'wastage') {
       updates.wastage = (record.wastage || 0) + data.quantity;
     } else if (data.type === 'opening') {
+      // If manually setting opening stock, we override the derived one.
       updates.openingStock = data.quantity;
     }
 
@@ -322,45 +343,60 @@ export class DatabaseStorage implements IStorage {
       .set(updates)
       .where(eq(stock.id, record.id))
       .returning();
+
+    await this.propagateStockChanges(data.itemId, date);
       
     return updated;
   }
 
   private async getAvailableStock(itemId: number, date: Date): Promise<number> {
-    const dayStart = startOfDay(date);
-    const dayEnd = endOfDay(date);
-    const existing = await db.select().from(stock)
-      .where(and(eq(stock.itemId, itemId), gte(stock.date, dayStart), lte(stock.date, dayEnd)))
-      .limit(1);
-    if (existing.length === 0) return 0;
-    const s = existing[0];
-    return (s.openingStock || 0) + (s.purchased || 0) - (s.sold || 0) - (s.wastage || 0);
+    const record = await this.getOrInitDailyStock(itemId, date);
+    return (record.closingStock || 0);
   }
 
   private async consumeIngredient(itemId: number, date: Date, quantity: number): Promise<void> {
-    const dayStart = startOfDay(date);
-    const dayEnd = endOfDay(date);
-    const existing = await db.select().from(stock)
-      .where(and(eq(stock.itemId, itemId), gte(stock.date, dayStart), lte(stock.date, dayEnd)))
+    const record = await this.getOrInitDailyStock(itemId, date);
+    
+    await db.update(stock)
+      .set({
+        sold: (record.sold || 0) + quantity,
+        closingStock: (record.openingStock || 0) + (record.purchased || 0) - ((record.sold || 0) + quantity) - (record.wastage || 0)
+      })
+      .where(eq(stock.id, record.id));
+
+    await this.propagateStockChanges(itemId, date);
+  }
+
+  private async propagateStockChanges(itemId: number, fromDate: Date) {
+    const records = await db.select().from(stock)
+      .where(and(eq(stock.itemId, itemId), gt(stock.date, endOfDay(fromDate))))
+      .orderBy(stock.date);
+
+    if (records.length === 0) return;
+    
+    // Get the closing stock of the 'fromDate' record (the source of truth)
+    const [sourceRecord] = await db.select().from(stock)
+      .where(and(eq(stock.itemId, itemId), gte(stock.date, startOfDay(fromDate)), lte(stock.date, endOfDay(fromDate))))
       .limit(1);
-    if (existing.length > 0) {
-      const current = existing[0];
-      await db.update(stock)
-        .set({
-          sold: (current.sold || 0) + quantity,
-          closingStock: (current.openingStock || 0) + (current.purchased || 0) - ((current.sold || 0) + quantity) - (current.wastage || 0)
-        })
-        .where(eq(stock.id, current.id));
-    } else {
-      await db.insert(stock).values({
-        itemId,
-        date,
-        openingStock: 0,
-        purchased: 0,
-        sold: quantity,
-        wastage: 0,
-        closingStock: 0 - quantity
-      });
+      
+    if (!sourceRecord) return;
+
+    let previousClosingStock = sourceRecord.closingStock || 0;
+
+    for (const record of records) {
+      const newOpening = previousClosingStock;
+      const newClosing = newOpening + (record.purchased || 0) - (record.sold || 0) - (record.wastage || 0);
+      
+      if (record.openingStock !== newOpening || record.closingStock !== newClosing) {
+        await db.update(stock)
+          .set({
+            openingStock: newOpening,
+            closingStock: newClosing
+          })
+          .where(eq(stock.id, record.id));
+      }
+      
+      previousClosingStock = newClosing;
     }
   }
 
@@ -750,6 +786,19 @@ export class DatabaseStorage implements IStorage {
       quantity: String(i.quantity),
       unit: i.unit,
     })));
+
+    // Update menu item cost price based on ingredients
+    let totalCost = 0;
+    for (const ing of ingredients) {
+      const [item] = await db.select().from(items).where(eq(items.id, ing.ingredientId));
+      if (item) {
+        totalCost += Number(item.costPrice) * ing.quantity;
+      }
+    }
+    await db.update(items)
+      .set({ costPrice: Math.round(totalCost) })
+      .where(eq(items.id, menuItemId));
+
     return { message: "Recipe saved" };
   }
 

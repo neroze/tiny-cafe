@@ -11,10 +11,12 @@ export default function RecipesPage() {
   const { data: items = [], isLoading } = useItems();
   const [search, setSearch] = useState("");
 
-  const filteredItems = items.filter(item => 
-    item.name.toLowerCase().includes(search.toLowerCase()) || 
-    item.category.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredItems = items
+    .filter(item => !item.isIngredient)
+    .filter(item => 
+      item.name.toLowerCase().includes(search.toLowerCase()) || 
+      item.category.toLowerCase().includes(search.toLowerCase())
+    );
 
   return (
     <Layout>
@@ -26,7 +28,7 @@ export default function RecipesPage() {
       <div className="mb-6 relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
         <Input 
-          placeholder="Search items..." 
+          placeholder="Search menu items..." 
           className="pl-10"
           value={search}
           onChange={e => setSearch(e.target.value)}
@@ -39,7 +41,7 @@ export default function RecipesPage() {
         ))}
         {filteredItems.length === 0 && !isLoading && (
           <div className="col-span-full py-12 text-center text-muted-foreground bg-card rounded-2xl border border-dashed border-border">
-            No items found. Add items first in Menu.
+            No menu items found. Add menu items first in Menu.
           </div>
         )}
       </div>
@@ -77,8 +79,11 @@ function RecipeDialog({ open, onOpenChange, menuItem }: { open: boolean; onOpenC
   const [rows, setRows] = useState<{ ingredientId: number; quantity: number; unit: string }[]>(
     recipe?.ingredients?.map((i: any) => ({ ingredientId: i.ingredientId, quantity: Number(i.quantity), unit: i.unit })) || []
   );
-  const missingItems = inventoryItems.length > 0 ? items.filter(i => rows.some(r => r.ingredientId === i.id) && !i.isIngredient) : [];
+  const missingItems = items.filter(i => rows.some(r => r.ingredientId === i.id) && !i.isIngredient);
   const ingredientOptions = [...inventoryItems, ...missingItems];
+  
+  const canAdd = inventoryItems.length > 0;
+
   useEffect(() => {
     if (recipe?.ingredients) {
       setRows(recipe.ingredients.map((i: any) => ({
@@ -89,10 +94,15 @@ function RecipeDialog({ open, onOpenChange, menuItem }: { open: boolean; onOpenC
     }
   }, [recipe]);
   const addRow = () => {
+    if (!canAdd) return;
     const selectedIds = new Set(rows.map(r => r.ingredientId));
-    const baseOptions = inventoryItems.length > 0 ? inventoryItems : items;
+    // Prefer inventory items, but if none available (which shouldn't happen due to canAdd check) fallback safely
+    const baseOptions = inventoryItems;
     const firstAvailable = baseOptions.find(i => !selectedIds.has(i.id)) || baseOptions[0];
-    setRows([...rows, { ingredientId: firstAvailable?.id || 0, quantity: 1, unit: firstAvailable?.unit || "pcs" }]);
+    
+    if (!firstAvailable) return; 
+
+    setRows([...rows, { ingredientId: firstAvailable.id, quantity: 1, unit: firstAvailable.unit || "pcs" }]);
   };
   const updateRow = (idx: number, patch: Partial<{ ingredientId: number; quantity: number; unit: string }>) => {
     const next = [...rows];
@@ -154,11 +164,16 @@ function RecipeDialog({ open, onOpenChange, menuItem }: { open: boolean; onOpenC
             </div>
           ))}
           <div className="flex justify-between items-center">
-            <Button variant="outline" onClick={addRow}><Plus className="w-4 h-4 mr-2" /> Add Ingredient</Button>
+            <Button variant="outline" onClick={addRow} disabled={!canAdd}><Plus className="w-4 h-4 mr-2" /> Add Ingredient</Button>
             <div className={`text-sm ${warn ? "text-red-500" : "text-muted-foreground"}`}>
               Cost per unit: NPR {costPreview.toLocaleString()} {warn ? "(> selling price!)" : ""}
             </div>
           </div>
+          {!canAdd && rows.length === 0 && (
+            <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-md border border-amber-200">
+              No inventory items found. Please go to Menu and create items marked as "Ingredient" first.
+            </div>
+          )}
         </div>
         <div className="pt-4 flex justify-end gap-2">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
