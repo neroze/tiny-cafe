@@ -56,6 +56,11 @@ export const handler: Handler = async (event) => {
     const body = parseBody(event);
     const path = normalizePath(event.path);
 
+    const extractOrderId = (p: string) => {
+      const m = p.match(/\/orders\/(\d+)(?:\/(items|close))?/);
+      return m && m[1] ? Number(m[1]) : NaN;
+    };
+
     if (method === "GET" && path === api.expenses.list.path) {
       const result = await listExpensesByQuery({ from: qp.from, to: qp.to });
       return json(200, result);
@@ -391,15 +396,23 @@ export const handler: Handler = async (event) => {
       }
     }
 
-    if (method === "POST" && path.match(/^\/_?netlify\/functions\/api\/orders\/\d+\/items$|^\/api\/orders\/\d+\/items$/)) {
+    if (method === "POST" && path.startsWith("/api/orders/") && path.endsWith("/items")) {
       try {
-        const idStr = path.split("/").filter(Boolean).pop();
-        const id = Number(idStr);
-        const validated = api.orders.addItem.input.parse(body);
-        const sale = await storage.addItemToOrder(id, validated);
+        const orderId = extractOrderId(path);
+        if (!orderId || Number.isNaN(orderId)) return json(400, { message: "Invalid order id" });
+        const raw = { ...body };
+        const item = {
+          ...raw,
+          itemId: Number(raw.itemId),
+          quantity: Number(raw.quantity),
+          unitPrice: Number(raw.unitPrice),
+          total: Number(raw.total),
+          date: raw.date ? new Date(raw.date) : new Date(),
+          labels: raw.labels || [],
+        };
+        const sale = await storage.addItemToOrder(orderId, item as any);
         return json(201, sale);
       } catch (err: any) {
-        if (err instanceof z.ZodError) return json(400, { message: err.message });
         return json(400, { message: err.message || "Failed to add item" });
       }
     }
@@ -415,11 +428,11 @@ export const handler: Handler = async (event) => {
       }
     }
 
-    if (method === "POST" && path.match(/^\/_?netlify\/functions\/api\/orders\/\d+\/close$|^\/api\/orders\/\d+\/close$/)) {
+    if (method === "POST" && path.startsWith("/api/orders/") && path.endsWith("/close")) {
       try {
-        const idStr = path.split("/").filter(Boolean).pop();
-        const id = Number(idStr);
-        const order = await storage.closeOrder(id);
+        const orderId = extractOrderId(path);
+        if (!orderId || Number.isNaN(orderId)) return json(400, { message: "Invalid order id" });
+        const order = await storage.closeOrder(orderId);
         return json(200, order);
       } catch (err: any) {
         return json(400, { message: err.message || "Failed to close order" });
