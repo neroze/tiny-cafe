@@ -8,6 +8,7 @@ import { listStock, recordStockTransactionFromBody } from "../../server/services
 import { getDashboardStats, getProfit, getExportCSV, getTargets, updateTargetsFromBody } from "../../server/services/dashboardService";
 import { getMergedLabels, getConfiguredLabels, addLabel, removeLabel, getConfiguredCategories, addCategory, removeCategory } from "../../server/services/configService";
 import { getRecipeByMenuItem, upsertRecipeFromBody, deleteRecipeForMenuItem } from "../../server/services/recipeService";
+import { storage } from "../../server/storage";
 
 function json(statusCode: number, data: any) {
   return {
@@ -324,6 +325,104 @@ export const handler: Handler = async (event) => {
         return { statusCode: 204, body: "" };
       } catch (err) {
         return json(400, { message: (err as any)?.message || "Failed to delete recipe" });
+      }
+    }
+
+    // Tables
+    if (method === "GET" && path === api.tables.list.path) {
+      const tables = await storage.getTables();
+      return json(200, tables);
+    }
+
+    if (method === "POST" && path === api.tables.create.path) {
+      try {
+        const validated = api.tables.create.input.parse(body);
+        const table = await storage.createTable(validated);
+        return json(201, table);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) return json(400, { message: err.message });
+        return json(400, { message: err.message || "Failed to create table" });
+      }
+    }
+
+    if (method === "PUT" && path.startsWith("/api/tables/")) {
+      try {
+        const idStr = path.split("/").pop();
+        const id = Number(idStr);
+        const validated = api.tables.update.input.parse(body);
+        const table = await storage.updateTable(id, validated);
+        return json(200, table);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) return json(400, { message: err.message });
+        return json(404, { message: err.message || "Table not found" });
+      }
+    }
+
+    if (method === "DELETE" && path.startsWith("/api/tables/")) {
+      const idStr = path.split("/").pop();
+      const id = Number(idStr);
+      await storage.deleteTable(id);
+      return { statusCode: 204, body: "" };
+    }
+
+    // Orders
+    if (method === "GET" && path === api.orders.list.path) {
+      const status = qp.status as string | undefined;
+      const orders = await storage.getOrders(status);
+      return json(200, orders);
+    }
+
+    if (method === "GET" && path.startsWith("/api/orders/")) {
+      const idStr = path.split("/").pop();
+      const id = Number(idStr);
+      const order = await storage.getOrder(id);
+      if (!order) return json(404, { message: "Order not found" });
+      return json(200, order);
+    }
+
+    if (method === "POST" && path === api.orders.create.path) {
+      try {
+        const validated = api.orders.create.input.parse(body);
+        const order = await storage.createOrder(validated);
+        return json(201, order);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) return json(400, { message: err.message });
+        return json(400, { message: err.message || "Failed to create order" });
+      }
+    }
+
+    if (method === "POST" && path.match(/^\/_?netlify\/functions\/api\/orders\/\d+\/items$|^\/api\/orders\/\d+\/items$/)) {
+      try {
+        const idStr = path.split("/").filter(Boolean).pop();
+        const id = Number(idStr);
+        const validated = api.orders.addItem.input.parse(body);
+        const sale = await storage.addItemToOrder(id, validated);
+        return json(201, sale);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) return json(400, { message: err.message });
+        return json(400, { message: err.message || "Failed to add item" });
+      }
+    }
+
+    if (method === "DELETE" && path.match(/^\/_?netlify\/functions\/api\/orders\/items\/\d+$|^\/api\/orders\/items\/\d+$/)) {
+      try {
+        const idStr = path.split("/").pop();
+        const id = Number(idStr);
+        await storage.removeItemFromOrder(id);
+        return { statusCode: 204, body: "" };
+      } catch (err: any) {
+        return json(400, { message: err.message || "Failed to remove item" });
+      }
+    }
+
+    if (method === "POST" && path.match(/^\/_?netlify\/functions\/api\/orders\/\d+\/close$|^\/api\/orders\/\d+\/close$/)) {
+      try {
+        const idStr = path.split("/").filter(Boolean).pop();
+        const id = Number(idStr);
+        const order = await storage.closeOrder(id);
+        return json(200, order);
+      } catch (err: any) {
+        return json(400, { message: err.message || "Failed to close order" });
       }
     }
 

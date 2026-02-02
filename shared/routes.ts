@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertItemSchema, insertSaleSchema, items, sales, stock, expenses, insertExpenseSchema } from './schema';
+import { insertItemSchema, insertSaleSchema, items, sales, stock, expenses, insertExpenseSchema, tables, orders, insertTableSchema, insertOrderSchema } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -307,6 +307,95 @@ export const api = {
         400: errorSchemas.validation,
       },
     },
+  },
+  tables: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/tables',
+      responses: {
+        200: z.array(z.custom<typeof tables.$inferSelect>()),
+      },
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/tables',
+      input: insertTableSchema,
+      responses: {
+        201: z.custom<typeof tables.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
+    update: {
+      method: 'PUT' as const,
+      path: '/api/tables/:id',
+      input: insertTableSchema.partial(),
+      responses: {
+        200: z.custom<typeof tables.$inferSelect>(),
+        404: errorSchemas.notFound,
+      },
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/tables/:id',
+      responses: {
+        204: z.void(),
+        404: errorSchemas.notFound,
+      },
+    },
+  },
+  orders: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/orders',
+      input: z.object({
+        status: z.string().optional(),
+      }).optional(),
+      responses: {
+        200: z.array(z.custom<typeof orders.$inferSelect & { table: typeof tables.$inferSelect | null, items: any[] }>()),
+      },
+    },
+    get: {
+      method: 'GET' as const,
+      path: '/api/orders/:id',
+      responses: {
+        200: z.custom<typeof orders.$inferSelect & { table: typeof tables.$inferSelect | null, items: any[] }>(),
+        404: errorSchemas.notFound,
+      },
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/orders',
+      input: insertOrderSchema,
+      responses: {
+        201: z.custom<typeof orders.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
+    addItem: {
+        method: 'POST' as const,
+        path: '/api/orders/:id/items',
+        input: insertSaleSchema,
+        responses: {
+            201: z.custom<typeof sales.$inferSelect>(),
+            400: errorSchemas.validation,
+        }
+    },
+    removeItem: {
+        method: 'DELETE' as const,
+        path: '/api/orders/items/:id',
+        responses: {
+            204: z.void(),
+            404: errorSchemas.notFound,
+        }
+    },
+    close: {
+        method: 'POST' as const,
+        path: '/api/orders/:id/close',
+        responses: {
+            200: z.custom<typeof orders.$inferSelect>(),
+            400: errorSchemas.validation,
+        }
+    }
   },
 };
 

@@ -16,8 +16,26 @@ export const items = pgTable("items", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const tables = pgTable("tables", {
+  id: serial("id").primaryKey(),
+  number: integer("number").notNull().unique(),
+  capacity: integer("capacity").default(4),
+  status: text("status").default("empty"), // empty, occupied
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const orders = pgTable("orders", {
+  id: serial("id").primaryKey(),
+  tableId: integer("table_id").references(() => tables.id).notNull(),
+  status: text("status").default("OPEN"), // OPEN, CLOSED, CANCELLED
+  total: integer("total").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  closedAt: timestamp("closed_at"),
+});
+
 export const sales = pgTable("sales", {
   id: serial("id").primaryKey(),
+  orderId: integer("order_id").references(() => orders.id), // Link to order
   date: timestamp("date").defaultNow().notNull(),
   itemId: integer("item_id").references(() => items.id).notNull(),
   quantity: integer("quantity").notNull(),
@@ -96,6 +114,18 @@ export const recipeItemsRelations = relations(recipeItems, ({ one }) => ({
   }),
 }));
 
+export const tablesRelations = relations(tables, ({ many }) => ({
+  orders: many(orders),
+}));
+
+export const ordersRelations = relations(orders, ({ one, many }) => ({
+  table: one(tables, {
+    fields: [orders.tableId],
+    references: [tables.id],
+  }),
+  items: many(sales),
+}));
+
 export const settings = pgTable("settings", {
   id: serial("id").primaryKey(),
   key: text("key").unique().notNull(),
@@ -118,6 +148,8 @@ export const insertExpenseSchema = createInsertSchema(expenses, {
 }).omit({ id: true, createdAt: true });
 export const insertRecipeSchema = createInsertSchema(recipes).omit({ id: true, createdAt: true });
 export const insertRecipeItemSchema = createInsertSchema(recipeItems).omit({ id: true });
+export const insertTableSchema = createInsertSchema(tables).omit({ id: true, createdAt: true });
+export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true, closedAt: true });
 
 // Types
 export type Item = typeof items.$inferSelect;
@@ -132,6 +164,10 @@ export type Recipe = typeof recipes.$inferSelect;
 export type InsertRecipe = z.infer<typeof insertRecipeSchema>;
 export type RecipeItem = typeof recipeItems.$inferSelect;
 export type InsertRecipeItem = z.infer<typeof insertRecipeItemSchema>;
+export type Table = typeof tables.$inferSelect;
+export type InsertTable = z.infer<typeof insertTableSchema>;
+export type Order = typeof orders.$inferSelect;
+export type InsertOrder = z.infer<typeof insertOrderSchema>;
 
 export type CreateSaleRequest = InsertSale;
 export type CreateStockTransactionRequest = {

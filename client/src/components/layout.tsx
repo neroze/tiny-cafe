@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Coffee, Receipt, Package, Menu as MenuIcon, X } from "lucide-react";
+import { LayoutDashboard, Coffee, Receipt, Package, Menu as MenuIcon, X, Users } from "lucide-react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -9,7 +9,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/sales", label: "Sales Entry", icon: Receipt },
+    { href: "/sales", label: "Sales & Orders", icon: Receipt },
+    { href: "/tables", label: "Tables", icon: Users },
     { href: "/menu", label: "Menu Items", icon: Coffee },
     { href: "/stock", label: "Inventory", icon: Package },
     { href: "/expenses", label: "Expenses", icon: Receipt },

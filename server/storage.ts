@@ -1,14 +1,16 @@
 import { db } from "./db";
 import {
-  items, sales, stock, settings, expenses, recipes, recipeItems,
+  items, sales, stock, settings, expenses, recipes, recipeItems, tables, orders,
   type Item, type InsertItem,
   type Sale, type InsertSale,
   type Stock, type InsertStock,
   type Expense, type InsertExpense,
   type CreateStockTransactionRequest,
-  type RecipeItem
+  type RecipeItem,
+  type Table, type InsertTable,
+  type Order, type InsertOrder
 } from "@shared/schema";
-import { eq, sql, and, desc, sum, gte, lte, gt } from "drizzle-orm";
+import { eq, sql, and, desc, sum, gte, lte, gt, or, isNull } from "drizzle-orm";
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter } from "date-fns";
 
 export interface IStorage {
@@ -80,6 +82,21 @@ export interface IStorage {
     trend: { date: string; net: number }[];
     alerts: { consecutiveNetLossDays: number; expenseSpike: boolean };
   }>;
+
+  // Tables
+  getTables(): Promise<Table[]>;
+  createTable(table: InsertTable): Promise<Table>;
+  updateTable(id: number, updates: Partial<InsertTable>): Promise<Table>;
+  deleteTable(id: number): Promise<void>;
+
+  // Orders
+  getOrders(status?: string): Promise<(Order & { table: Table | null, items: (Sale & { item: Item })[] })[]>;
+  getOrder(id: number): Promise<(Order & { table: Table | null, items: (Sale & { item: Item })[] }) | undefined>;
+  createOrder(order: InsertOrder): Promise<Order>;
+  updateOrder(id: number, updates: Partial<InsertOrder>): Promise<Order>;
+  addItemToOrder(orderId: number, item: InsertSale): Promise<Sale>;
+  removeItemFromOrder(saleId: number): Promise<void>;
+  closeOrder(id: number): Promise<Order>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -113,44 +130,57 @@ export class DatabaseStorage implements IStorage {
   async getSalesWithLabels(date?: Date, limit: number = 50): Promise<(Sale & { item: Item })[]> {
     let query = db.select({
       id: sales.id,
+      orderId: sales.orderId,
       date: sales.date,
       itemId: sales.itemId,
       quantity: sales.quantity,
       unitPrice: sales.unitPrice,
       total: sales.total,
       labels: sales.labels,
-      createdAt: sales.createdAt,
-      item: items
-    })
-    .from(sales)
-    .innerJoin(items, eq(sales.itemId, items.id));
-
-    if (date) {
-      const start = startOfDay(date);
-      const end = endOfDay(date);
-      query.where(and(gte(sales.date, start), lte(sales.date, end)));
-    }
-
-    return await query.orderBy(desc(sales.date)).limit(limit) as any;
-  }
-
-  async getSalesRange(from?: Date, to?: Date, limit: number = 500): Promise<(Sale & { item: Item })[]> {
-    const start = from ? startOfDay(from) : startOfMonth(new Date());
-    const end = to ? endOfDay(to) : endOfDay(new Date());
-    return await db.select({
-      id: sales.id,
-      date: sales.date,
-      itemId: sales.itemId,
-      quantity: sales.quantity,
-      unitPrice: sales.unitPrice,
-      total: sales.total,
-      labels: sales.labels,
+      cogs: sales.cogs,
       createdAt: sales.createdAt,
       item: items
     })
     .from(sales)
     .innerJoin(items, eq(sales.itemId, items.id))
-    .where(and(gte(sales.date, start), lte(sales.date, end)))
+    .leftJoin(orders, eq(sales.orderId, orders.id));
+
+    const conditions = [or(isNull(sales.orderId), eq(orders.status, 'CLOSED'))];
+
+    if (date) {
+      const start = startOfDay(date);
+      const end = endOfDay(date);
+      conditions.push(and(gte(sales.date, start), lte(sales.date, end)));
+    }
+
+    return await query.where(and(...conditions)).orderBy(desc(sales.date)).limit(limit) as any;
+  }
+
+  async getSalesRange(from?: Date, to?: Date, limit: number = 500): Promise<(Sale & { item: Item })[]> {
+    const start = from ? startOfDay(from) : startOfMonth(new Date());
+    const end = to ? endOfDay(to) : endOfDay(new Date());
+    
+    return await db.select({
+      id: sales.id,
+      orderId: sales.orderId,
+      date: sales.date,
+      itemId: sales.itemId,
+      quantity: sales.quantity,
+      unitPrice: sales.unitPrice,
+      total: sales.total,
+      labels: sales.labels,
+      cogs: sales.cogs,
+      createdAt: sales.createdAt,
+      item: items
+    })
+    .from(sales)
+    .innerJoin(items, eq(sales.itemId, items.id))
+    .leftJoin(orders, eq(sales.orderId, orders.id))
+    .where(and(
+      gte(sales.date, start), 
+      lte(sales.date, end),
+      or(isNull(sales.orderId), eq(orders.status, 'CLOSED'))
+    ))
     .orderBy(desc(sales.date))
     .limit(limit) as any;
   }
@@ -814,6 +844,186 @@ export class DatabaseStorage implements IStorage {
     if (!rec) return;
     await db.delete(recipeItems).where(eq(recipeItems.recipeId, rec.id));
     await db.delete(recipes).where(eq(recipes.id, rec.id));
+  }
+
+  async getTables(): Promise<Table[]> {
+    return await db.select().from(tables).orderBy(tables.number);
+  }
+
+  async createTable(table: InsertTable): Promise<Table> {
+    const [created] = await db.insert(tables).values(table).returning();
+    return created;
+  }
+
+  async updateTable(id: number, updates: Partial<InsertTable>): Promise<Table> {
+    const [updated] = await db.update(tables).set(updates).where(eq(tables.id, id)).returning();
+    return updated;
+  }
+
+  async deleteTable(id: number): Promise<void> {
+    await db.delete(tables).where(eq(tables.id, id));
+  }
+
+  async getOrders(status?: string): Promise<(Order & { table: Table | null, items: (Sale & { item: Item })[] })[]> {
+    let query = db.select().from(orders).leftJoin(tables, eq(orders.tableId, tables.id));
+    
+    if (status) {
+      query.where(eq(orders.status, status));
+    }
+    
+    const result = await query.orderBy(desc(orders.createdAt));
+    
+    const ordersWithItems = await Promise.all(result.map(async (row) => {
+        const orderItems = await db.select({
+            id: sales.id,
+            orderId: sales.orderId,
+            date: sales.date,
+            itemId: sales.itemId,
+            quantity: sales.quantity,
+            unitPrice: sales.unitPrice,
+            total: sales.total,
+            labels: sales.labels,
+            cogs: sales.cogs,
+            createdAt: sales.createdAt,
+            item: items
+        })
+        .from(sales)
+        .innerJoin(items, eq(sales.itemId, items.id))
+        .where(eq(sales.orderId, row.orders.id));
+        
+        return { ...row.orders, table: row.tables, items: orderItems as any };
+    }));
+    
+    return ordersWithItems;
+  }
+
+  async getOrder(id: number): Promise<(Order & { table: Table | null, items: (Sale & { item: Item })[] }) | undefined> {
+    const [row] = await db.select().from(orders)
+      .leftJoin(tables, eq(orders.tableId, tables.id))
+      .where(eq(orders.id, id));
+      
+    if (!row) return undefined;
+    
+    const orderItems = await db.select({
+        id: sales.id,
+        orderId: sales.orderId,
+        date: sales.date,
+        itemId: sales.itemId,
+        quantity: sales.quantity,
+        unitPrice: sales.unitPrice,
+        total: sales.total,
+        labels: sales.labels,
+        cogs: sales.cogs,
+        createdAt: sales.createdAt,
+        item: items
+    })
+    .from(sales)
+    .innerJoin(items, eq(sales.itemId, items.id))
+    .where(eq(sales.orderId, id));
+    
+    return { ...row.orders, table: row.tables, items: orderItems as any };
+  }
+
+  async createOrder(order: InsertOrder): Promise<Order> {
+    const existing = await db.select().from(orders)
+      .where(and(eq(orders.tableId, order.tableId), eq(orders.status, 'OPEN')));
+      
+    if (existing.length > 0) {
+      throw new Error(`Table ${order.tableId} already has an open order`);
+    }
+
+    const [created] = await db.insert(orders).values(order).returning();
+    await db.update(tables).set({ status: 'occupied' }).where(eq(tables.id, order.tableId));
+    return created;
+  }
+
+  async updateOrder(id: number, updates: Partial<InsertOrder>): Promise<Order> {
+    const [updated] = await db.update(orders).set(updates).where(eq(orders.id, id)).returning();
+    return updated;
+  }
+
+  async addItemToOrder(orderId: number, item: InsertSale): Promise<Sale> {
+     const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+     if (!order || order.status !== 'OPEN') {
+         throw new Error("Order is not open");
+     }
+
+     const [sale] = await db.insert(sales).values({ ...item, orderId, cogs: "0" }).returning();
+     
+     const currentTotal = order.total || 0;
+     await db.update(orders).set({ total: currentTotal + sale.total }).where(eq(orders.id, orderId));
+     
+     return sale;
+  }
+
+  async removeItemFromOrder(saleId: number): Promise<void> {
+    const [sale] = await db.select().from(sales).where(eq(sales.id, saleId));
+    if (!sale) return;
+    
+    if (sale.orderId) {
+        const [order] = await db.select().from(orders).where(eq(orders.id, sale.orderId));
+        if (order && order.status === 'OPEN') {
+             await db.delete(sales).where(eq(sales.id, saleId));
+             await db.update(orders).set({ total: (order.total || 0) - sale.total }).where(eq(orders.id, order.id));
+        } else {
+            throw new Error("Cannot remove item from closed order");
+        }
+    }
+  }
+
+  async closeOrder(id: number): Promise<Order> {
+    const orderWithItems = await this.getOrder(id);
+    if (!orderWithItems) throw new Error("Order not found");
+    if (orderWithItems.status !== 'OPEN') throw new Error("Order is not open");
+    
+    const now = new Date();
+    const allowInsufficient = (await this.getSetting("allow_sale_without_stock")) === "true";
+
+    // Validate Stock First
+    for (const saleItem of orderWithItems.items) {
+        const recipe = await this.getRecipeByMenuItem(saleItem.itemId);
+        if (recipe) {
+             for (const comp of recipe.ingredients) {
+                const needed = Math.round(Number(comp.quantity) * Number(saleItem.quantity));
+                const available = await this.getAvailableStock(comp.ingredientId, now);
+                if (!allowInsufficient && available < needed) {
+                    throw new Error(`Insufficient stock for ingredient ID ${comp.ingredientId}: need ${needed}, have ${available}`);
+                }
+             }
+        }
+    }
+    
+    // Process Stock Deduction
+    for (const saleItem of orderWithItems.items) {
+        const recipe = await this.getRecipeByMenuItem(saleItem.itemId);
+        let saleCogs = 0;
+        
+        if (recipe && recipe.ingredients.length > 0) {
+            for (const comp of recipe.ingredients) {
+              const useQty = Math.round(Number(comp.quantity) * Number(saleItem.quantity));
+              await this.consumeIngredient(comp.ingredientId, now, useQty);
+              
+              const [ing] = await db.select().from(items).where(eq(items.id, comp.ingredientId)).limit(1);
+              if (ing) {
+                  saleCogs += Number(ing.costPrice) * Number(comp.quantity);
+              }
+            }
+            saleCogs = saleCogs * Number(saleItem.quantity);
+        }
+        
+        await db.update(sales).set({ cogs: String(saleCogs) }).where(eq(sales.id, saleItem.id));
+    }
+    
+    const [closedOrder] = await db.update(orders)
+        .set({ status: 'CLOSED', closedAt: now })
+        .where(eq(orders.id, id))
+        .returning();
+        
+    if (closedOrder.tableId) {
+        await db.update(tables).set({ status: 'empty' }).where(eq(tables.id, closedOrder.tableId));
+    }
+    
+    return closedOrder;
   }
 }
 

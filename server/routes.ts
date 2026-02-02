@@ -276,6 +276,91 @@ export async function registerRoutes(
     res.json(cats);
   });
 
+  // Tables
+  app.get(api.tables.list.path, async (req, res) => {
+    const tables = await storage.getTables();
+    res.json(tables);
+  });
+
+  app.post(api.tables.create.path, async (req, res) => {
+    try {
+        const table = await storage.createTable(req.body);
+        res.status(201).json(table);
+    } catch (err: any) {
+        if (err.name === "ZodError") return res.status(400).json({ message: err.message });
+        res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.put(api.tables.update.path, async (req, res) => {
+      const table = await storage.updateTable(Number(req.params.id), req.body);
+      res.json(table);
+  });
+
+  app.delete(api.tables.delete.path, async (req, res) => {
+      await storage.deleteTable(Number(req.params.id));
+      res.status(204).send();
+  });
+
+  // Orders
+  app.get(api.orders.list.path, async (req, res) => {
+      const status = req.query.status as string;
+      const orders = await storage.getOrders(status);
+      res.json(orders);
+  });
+
+  app.get(api.orders.get.path, async (req, res) => {
+      const order = await storage.getOrder(Number(req.params.id));
+      if (!order) return res.status(404).json({ message: "Order not found" });
+      res.json(order);
+  });
+
+  app.post(api.orders.create.path, async (req, res) => {
+      try {
+          const order = await storage.createOrder(req.body);
+          res.status(201).json(order);
+      } catch (err: any) {
+          res.status(400).json({ message: err.message });
+      }
+  });
+
+  app.post(api.orders.addItem.path, async (req, res) => {
+      try {
+          const raw = { ...req.body };
+          const item = {
+              ...raw,
+              itemId: Number(raw.itemId),
+              quantity: Number(raw.quantity),
+              unitPrice: Number(raw.unitPrice),
+              total: Number(raw.total),
+              date: raw.date ? new Date(raw.date) : new Date(),
+              labels: raw.labels || []
+          };
+          const sale = await storage.addItemToOrder(Number(req.params.id), item);
+          res.status(201).json(sale);
+      } catch (err: any) {
+          res.status(400).json({ message: err.message });
+      }
+  });
+
+  app.delete(api.orders.removeItem.path, async (req, res) => {
+      try {
+          await storage.removeItemFromOrder(Number(req.params.id));
+          res.status(204).send();
+      } catch (err: any) {
+          res.status(400).json({ message: err.message });
+      }
+  });
+
+  app.post(api.orders.close.path, async (req, res) => {
+      try {
+          const order = await storage.closeOrder(Number(req.params.id));
+          res.json(order);
+      } catch (err: any) {
+          res.status(400).json({ message: err.message });
+      }
+  });
+
   await seedDatabase();
 
   return httpServer;
