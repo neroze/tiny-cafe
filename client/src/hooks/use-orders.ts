@@ -114,10 +114,13 @@ export function useRemoveItemFromOrder() {
 export function useCloseOrder() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async (orderId: number) => {
+        mutationFn: async ({ orderId, paymentType, customerId }: { orderId: number; paymentType: 'CASH'|'CARD'|'CREDIT'; customerId?: number }) => {
             const url = buildUrl(api.orders.close.path, { id: orderId });
+            const payload = api.orders.close.input.parse({ paymentType, customerId });
             const res = await fetch(url, {
                 method: api.orders.close.method,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
                 credentials: "include",
             });
             if (!res.ok) {
@@ -126,8 +129,8 @@ export function useCloseOrder() {
             }
             return api.orders.close.responses[200].parse(await res.json());
         },
-        onSuccess: (_, orderId) => {
-            queryClient.invalidateQueries({ queryKey: [api.orders.get.path, orderId] });
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: [api.orders.get.path, variables.orderId] });
             queryClient.invalidateQueries({ queryKey: [api.orders.list.path] });
             queryClient.invalidateQueries({ queryKey: [api.tables.list.path] });
         }

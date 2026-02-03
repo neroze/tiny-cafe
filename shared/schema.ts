@@ -126,6 +126,33 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   items: many(sales),
 }));
 
+// Customers & Credit Sales
+export const customers = pgTable("customers", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  phone: text("phone").default(""),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const receivables = pgTable("receivables", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").references(() => orders.id).notNull(),
+  customerId: integer("customer_id").references(() => customers.id).notNull(),
+  amount: integer("amount").notNull(),
+  outstanding: integer("outstanding").notNull(),
+  status: text("status").default("OPEN"), // OPEN, CLOSED
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const payments = pgTable("payments", {
+  id: serial("id").primaryKey(),
+  receivableId: integer("receivable_id").references(() => receivables.id).notNull(),
+  amount: integer("amount").notNull(),
+  method: text("method").notNull(), // CASH | CARD
+  date: timestamp("date").defaultNow().notNull(),
+});
+
 export const settings = pgTable("settings", {
   id: serial("id").primaryKey(),
   key: text("key").unique().notNull(),
@@ -150,6 +177,9 @@ export const insertRecipeSchema = createInsertSchema(recipes).omit({ id: true, c
 export const insertRecipeItemSchema = createInsertSchema(recipeItems).omit({ id: true });
 export const insertTableSchema = createInsertSchema(tables).omit({ id: true, createdAt: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true, closedAt: true });
+export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, createdAt: true });
+export const insertReceivableSchema = createInsertSchema(receivables).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true });
 
 // Types
 export type Item = typeof items.$inferSelect;
@@ -168,6 +198,12 @@ export type Table = typeof tables.$inferSelect;
 export type InsertTable = z.infer<typeof insertTableSchema>;
 export type Order = typeof orders.$inferSelect;
 export type InsertOrder = z.infer<typeof insertOrderSchema>;
+export type Customer = typeof customers.$inferSelect;
+export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
+export type Receivable = typeof receivables.$inferSelect;
+export type InsertReceivable = z.infer<typeof insertReceivableSchema>;
+export type Payment = typeof payments.$inferSelect;
+export type InsertPayment = z.infer<typeof insertPaymentSchema>;
 
 export type CreateSaleRequest = InsertSale;
 export type CreateStockTransactionRequest = {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertItemSchema, insertSaleSchema, items, sales, stock, expenses, insertExpenseSchema, tables, orders, insertTableSchema, insertOrderSchema } from './schema';
+import { insertItemSchema, insertSaleSchema, items, sales, stock, expenses, insertExpenseSchema, tables, orders, insertTableSchema, insertOrderSchema, customers, receivables, insertCustomerSchema } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -391,11 +391,61 @@ export const api = {
     close: {
         method: 'POST' as const,
         path: '/api/orders/:id/close',
+        input: z.object({
+          paymentType: z.enum(['CASH','CARD','CREDIT']),
+          customerId: z.number().optional(),
+        }),
         responses: {
             200: z.custom<typeof orders.$inferSelect>(),
             400: errorSchemas.validation,
         }
     }
+  },
+  customers: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/customers',
+      responses: {
+        200: z.array(z.custom<typeof customers.$inferSelect>()),
+      },
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/customers',
+      input: insertCustomerSchema,
+      responses: {
+        201: z.custom<typeof customers.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
+  },
+  receivables: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/receivables',
+      responses: {
+        200: z.array(z.custom<typeof receivables.$inferSelect & { customer: typeof customers.$inferSelect }>()),
+      },
+    },
+    summary: {
+      method: 'GET' as const,
+      path: '/api/receivables/summary',
+      responses: {
+        200: z.object({
+          totalOutstanding: z.number(),
+          byCustomer: z.array(z.object({ customerId: z.number(), name: z.string(), outstanding: z.number() })),
+        }),
+      },
+    },
+    pay: {
+      method: 'POST' as const,
+      path: '/api/receivables/:id/payments',
+      input: z.object({ amount: z.number(), method: z.enum(['CASH','CARD']) }),
+      responses: {
+        200: z.custom<typeof receivables.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
   },
 };
 

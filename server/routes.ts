@@ -354,11 +354,52 @@ export async function registerRoutes(
 
   app.post(api.orders.close.path, async (req, res) => {
       try {
-          const order = await storage.closeOrder(Number(req.params.id));
+          const input = api.orders.close.input.parse(req.body);
+          const order = await storage.closeOrder(Number(req.params.id), input.paymentType, input.customerId);
           res.json(order);
       } catch (err: any) {
           res.status(400).json({ message: err.message });
       }
+  });
+
+  // Customers
+  app.get(api.customers.list.path, async (_req, res) => {
+    const customers = await storage.getCustomers();
+    res.json(customers);
+  });
+
+  app.post(api.customers.create.path, async (req, res) => {
+    try {
+      const validated = api.customers.create.input.parse(req.body);
+      const customer = await storage.createCustomer(validated);
+      res.status(201).json(customer);
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  // Receivables
+  app.get(api.receivables.list.path, async (_req, res) => {
+    const list = await storage.getReceivables();
+    res.json(list);
+  });
+
+  app.get(api.receivables.summary.path, async (_req, res) => {
+    const summary = await storage.getReceivablesSummary();
+    res.json(summary);
+  });
+
+  app.post(api.receivables.pay.path, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const validated = api.receivables.pay.input.parse(req.body);
+      const updated = await storage.recordPayment(id, validated.amount, validated.method);
+      res.json(updated);
+    } catch (err: any) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.message });
+      res.status(400).json({ message: err.message });
+    }
   });
 
   await seedDatabase();

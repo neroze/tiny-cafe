@@ -3,11 +3,13 @@ import { Layout } from "@/components/layout";
 import { PageHeader, Button, Card, Input } from "@/components/ui-components";
 import { useTables } from "@/hooks/use-tables";
 import { useOrders, useCreateOrder, useAddItemToOrder, useRemoveItemFromOrder, useCloseOrder } from "@/hooks/use-orders";
+import { useCustomers, useCreateCustomer } from "@/hooks/use-customers";
 import { useItems } from "@/hooks/use-items";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, ArrowLeft, ShoppingCart, CheckCircle, Trash2, Plus, Users, Utensils, Edit2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -111,6 +113,12 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
   const { data: openOrders = [], isLoading: isLoadingOrders } = useOrders("OPEN");
   const createOrder = useCreateOrder();
   const closeOrder = useCloseOrder();
+  const { data: customers = [] } = useCustomers();
+  const createCustomer = useCreateCustomer();
+
+  const [paymentType, setPaymentType] = useState<'CASH'|'CARD'|'CREDIT'>('CASH');
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
+  const [newCustomerName, setNewCustomerName] = useState("");
   
   const activeOrder = useMemo(() => 
     openOrders.find((o: any) => o.tableId === table.id),
@@ -132,7 +140,12 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
   const handleCloseOrder = async () => {
     if (!activeOrder) return;
     try {
-      await closeOrder.mutateAsync(activeOrder.id);
+      if (paymentType === 'CREDIT') {
+        if (!selectedCustomerId) throw new Error("Select customer for credit sale");
+        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType, customerId: selectedCustomerId });
+      } else {
+        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType });
+      }
       toast({ title: "Order Closed", description: `Order for Table ${table.number} has been finalized.` });
       onBack();
     } catch (err: any) {
@@ -164,12 +177,52 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
         </div>
         
         {activeOrder && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <div className="text-right mr-4">
               <div className="text-sm text-muted-foreground">Total Amount</div>
               <div className="text-2xl font-bold font-display text-primary">
                 NPR {Number(activeOrder.total).toLocaleString()}
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Select value={paymentType} onValueChange={(v: any) => setPaymentType(v)}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="Payment" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CASH">Cash</SelectItem>
+                  <SelectItem value="CARD">Card</SelectItem>
+                  <SelectItem value="CREDIT">Credit</SelectItem>
+                </SelectContent>
+              </Select>
+              {paymentType === 'CREDIT' && (
+                <div className="flex items-center gap-2">
+                  <Select value={selectedCustomerId ? String(selectedCustomerId) : undefined} onValueChange={(v: any) => setSelectedCustomerId(Number(v))}>
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue placeholder="Select customer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {customers.map((c: any) => (
+                        <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex items-center gap-2">
+                    <Input placeholder="New customer" value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)} className="w-[160px]" />
+                    <Button variant="outline" onClick={async () => {
+                      if (!newCustomerName.trim()) return;
+                      try {
+                        const created = await createCustomer.mutateAsync({ name: newCustomerName });
+                        setSelectedCustomerId((created as any).id);
+                        setNewCustomerName("");
+                        toast({ title: "Customer added" });
+                      } catch (err: any) {
+                        toast({ variant: "destructive", title: "Error", description: err.message });
+                      }
+                    }}>Add</Button>
+                  </div>
+                </div>
+              )}
             </div>
             <Button 
               onClick={handleCloseOrder}

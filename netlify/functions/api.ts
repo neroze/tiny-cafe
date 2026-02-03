@@ -432,10 +432,53 @@ export const handler: Handler = async (event) => {
       try {
         const orderId = extractOrderId(path);
         if (!orderId || Number.isNaN(orderId)) return json(400, { message: "Invalid order id" });
-        const order = await storage.closeOrder(orderId);
+        const input = api.orders.close.input.parse(body);
+        const order = await storage.closeOrder(orderId, input.paymentType, input.customerId);
         return json(200, order);
       } catch (err: any) {
+        if (err instanceof z.ZodError) return json(400, { message: err.message });
         return json(400, { message: err.message || "Failed to close order" });
+      }
+    }
+
+    // Customers
+    if (method === "GET" && path === api.customers.list.path) {
+      const list = await storage.getCustomers();
+      return json(200, list);
+    }
+
+    if (method === "POST" && path === api.customers.create.path) {
+      try {
+        const validated = api.customers.create.input.parse(body);
+        const customer = await storage.createCustomer(validated);
+        return json(201, customer);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) return json(400, { message: err.message });
+        return json(400, { message: err.message || "Failed to create customer" });
+      }
+    }
+
+    // Receivables
+    if (method === "GET" && path === api.receivables.list.path) {
+      const list = await storage.getReceivables();
+      return json(200, list);
+    }
+
+    if (method === "GET" && path === api.receivables.summary.path) {
+      const summary = await storage.getReceivablesSummary();
+      return json(200, summary);
+    }
+
+    if (method === "POST" && path.startsWith("/api/receivables/") && path.endsWith("/payments")) {
+      try {
+        const idStr = path.split("/").filter(Boolean).slice(-2)[0];
+        const id = Number(idStr);
+        const validated = api.receivables.pay.input.parse(body);
+        const updated = await storage.recordPayment(id, validated.amount, validated.method);
+        return json(200, updated);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) return json(400, { message: err.message });
+        return json(400, { message: err.message || "Failed to record payment" });
       }
     }
 

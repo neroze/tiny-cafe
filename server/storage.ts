@@ -1,6 +1,6 @@
 import { db } from "./db";
 import {
-  items, sales, stock, settings, expenses, recipes, recipeItems, tables, orders,
+  items, sales, stock, settings, expenses, recipes, recipeItems, tables, orders, customers, receivables, payments,
   type Item, type InsertItem,
   type Sale, type InsertSale,
   type Stock, type InsertStock,
@@ -8,7 +8,10 @@ import {
   type CreateStockTransactionRequest,
   type RecipeItem,
   type Table, type InsertTable,
-  type Order, type InsertOrder
+  type Order, type InsertOrder,
+  type Customer, type InsertCustomer,
+  type Receivable,
+  type Payment
 } from "@shared/schema";
 import { eq, sql, and, desc, sum, gte, lte, gt, or, isNull } from "drizzle-orm";
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter } from "date-fns";
@@ -96,7 +99,15 @@ export interface IStorage {
   updateOrder(id: number, updates: Partial<InsertOrder>): Promise<Order>;
   addItemToOrder(orderId: number, item: InsertSale): Promise<Sale>;
   removeItemFromOrder(saleId: number): Promise<void>;
-  closeOrder(id: number): Promise<Order>;
+  closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT', customerId?: number): Promise<Order>;
+
+  // Customers & Receivables
+  getCustomers(): Promise<Customer[]>;
+  createCustomer(cust: InsertCustomer): Promise<Customer>;
+  getReceivables(): Promise<(Receivable & { customer: Customer })[]>;
+  getReceivablesSummary(): Promise<{ totalOutstanding: number; byCustomer: { customerId: number; name: string; outstanding: number }[] }>;
+  createReceivable(orderId: number, customerId: number, amount: number): Promise<Receivable>;
+  recordPayment(receivableId: number, amount: number, method: 'CASH'|'CARD'): Promise<Receivable>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -971,7 +982,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async closeOrder(id: number): Promise<Order> {
+  async closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT', customerId?: number): Promise<Order> {
     const orderWithItems = await this.getOrder(id);
     if (!orderWithItems) throw new Error("Order not found");
     if (orderWithItems.status !== 'OPEN') throw new Error("Order is not open");
@@ -1023,7 +1034,73 @@ export class DatabaseStorage implements IStorage {
         await db.update(tables).set({ status: 'empty' }).where(eq(tables.id, closedOrder.tableId));
     }
     
+    if (paymentType === 'CREDIT') {
+      if (!customerId) throw new Error('Customer is required for credit sales');
+      await db.insert(receivables).values({
+        orderId: closedOrder.id,
+        customerId,
+        amount: closedOrder.total || 0,
+        outstanding: closedOrder.total || 0,
+        status: 'OPEN',
+      });
+    }
+
     return closedOrder;
+  }
+
+  async getCustomers(): Promise<Customer[]> {
+    return await db.select().from(customers).orderBy(desc(customers.createdAt));
+  }
+
+  async createCustomer(cust: InsertCustomer): Promise<Customer> {
+    const [created] = await db.insert(customers).values(cust).returning();
+    return created;
+  }
+
+  async getReceivables(): Promise<(Receivable & { customer: Customer })[]> {
+    const rows = await db.select({ receivable: receivables, customer: customers })
+      .from(receivables)
+      .innerJoin(customers, eq(receivables.customerId, customers.id))
+      .orderBy(desc(receivables.createdAt));
+    return rows.map(r => ({ ...(r.receivable as any), customer: r.customer })) as any;
+  }
+
+  async getReceivablesSummary(): Promise<{ totalOutstanding: number; byCustomer: { customerId: number; name: string; outstanding: number }[] }> {
+    const list = await this.getReceivables();
+    const totalOutstanding = list.reduce((sum, r) => sum + Number(r.outstanding), 0);
+    const map = new Map<number, { customerId: number; name: string; outstanding: number }>();
+    list.forEach(r => {
+      const key = (r as any).customer.id as number;
+      const existing = map.get(key) || { customerId: key, name: (r as any).customer.name, outstanding: 0 };
+      existing.outstanding += Number(r.outstanding);
+      map.set(key, existing);
+    });
+    return { totalOutstanding, byCustomer: Array.from(map.values()) };
+  }
+
+  async createReceivable(orderId: number, customerId: number, amount: number): Promise<Receivable> {
+    const [created] = await db.insert(receivables).values({ orderId, customerId, amount, outstanding: amount, status: 'OPEN' }).returning();
+    return created;
+  }
+
+  async recordPayment(receivableId: number, amount: number, method: 'CASH'|'CARD'): Promise<Receivable> {
+    const [rec] = await db.select().from(receivables).where(eq(receivables.id, receivableId));
+    if (!rec) throw new Error('Receivable not found');
+    if (amount <= 0) throw new Error('Amount must be positive');
+
+    await db.insert(payments).values({ receivableId, amount, method });
+    const newOutstanding = Math.max(0, (rec.outstanding || 0) - amount);
+    const newStatus = newOutstanding === 0 ? 'CLOSED' : 'OPEN';
+
+    const [updated] = await db.update(receivables)
+      .set({ outstanding: newOutstanding, status: newStatus, updatedAt: new Date() })
+      .where(eq(receivables.id, receivableId))
+      .returning();
+
+    const currentCash = Number((await this.getSetting('cash_balance')) || '0');
+    await this.setSetting('cash_balance', String(currentCash + amount));
+
+    return updated;
   }
 }
 
