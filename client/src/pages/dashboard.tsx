@@ -3,7 +3,7 @@ import { useDashboardStats } from "@/hooks/use-dashboard";
 import { useProfit } from "@/hooks/use-profit";
 import { Layout } from "@/components/layout";
 import { StatsCard } from "@/components/stats-card";
-import { DollarSign, Calendar as CalendarIcon, TrendingUp, Award, ArrowUpRight, Download, Settings as SettingsIcon, X } from "lucide-react";
+import { DollarSign, Calendar as CalendarIcon, TrendingUp, Award, ArrowUpRight, Download, Settings as SettingsIcon, X, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui-components";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend, CartesianGrid, PieChart, Pie } from "recharts";
 import { motion } from "framer-motion";
@@ -398,9 +398,9 @@ export default function Dashboard() {
           description={`Target: NPR ${(targets?.quarterly || 200000).toLocaleString()}`}
           colorClass="text-purple-500"
         />
-      </div>
+  </div>
 
-      {profit && (
+  {profit && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatsCard
             title="Total Expenses"
@@ -555,9 +555,9 @@ export default function Dashboard() {
           <Card className="h-full">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold font-display">Top Selling Items</h2>
-              <button className="text-sm text-primary font-medium hover:underline flex items-center gap-1">
+              <a href="/reports/revenue-by-item" className="text-sm text-primary font-medium hover:underline flex items-center gap-1">
                 View Report <ArrowUpRight className="w-4 h-4" />
-              </button>
+              </a>
             </div>
             
             <div className="overflow-x-auto">
@@ -595,12 +595,17 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
-          </Card>
-        </div>
+      </Card>
+    </div>
 
-        <div className="lg:col-span-1">
-          <Card className="h-full flex flex-col">
-            <h2 className="text-xl font-bold font-display mb-6">Sales Distribution</h2>
+    <Card className="mt-8">
+      <h2 className="text-xl font-bold font-display mb-4">Revenue Reports</h2>
+      <RevenueReports />
+    </Card>
+
+    <div className="lg:col-span-1">
+      <Card className="h-full flex flex-col">
+        <h2 className="text-xl font-bold font-display mb-6">Sales Distribution</h2>
             <div className="flex-1 min-h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
@@ -618,9 +623,144 @@ export default function Dashboard() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </Card>
-        </div>
+      </Card>
+    </div>
       </div>
     </Layout>
+  );
+}
+
+// Moved RevenueByItemSection to a dedicated route component
+
+function RevenueReports() {
+  const [preset, setPreset] = React.useState<'today'|'week'|'month'|'custom'>('week');
+  const [from, setFrom] = React.useState<string>(() => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]);
+  const [to, setTo] = React.useState<string>(() => new Date().toISOString().split("T")[0]);
+
+  React.useEffect(() => {
+    const todayIso = new Date().toISOString().split('T')[0];
+    if (preset === 'today') {
+      setFrom(todayIso);
+      setTo(todayIso);
+    } else if (preset === 'week') {
+      const now = new Date();
+      const dow = now.getDay(); // 0=Sun
+      const start = new Date(now);
+      start.setDate(now.getDate() - dow + 1); // assume week starts Monday
+      setFrom(start.toISOString().split('T')[0]);
+      setTo(todayIso);
+    } else if (preset === 'month') {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      setFrom(start.toISOString().split('T')[0]);
+      setTo(todayIso);
+    }
+  }, [preset]);
+
+  const summary = useQuery({
+    queryKey: [api.reports.revenue_summary.path, from, to],
+    queryFn: async () => {
+      const url = `${api.reports.revenue_summary.path}?from=${from}&to=${to}`;
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch summary');
+      return api.reports.revenue_summary.responses[200].parse(await res.json());
+    }
+  });
+
+  const byPayment = useQuery({
+    queryKey: [api.reports.revenue_by_payment.path, from, to],
+    queryFn: async () => {
+      const url = `${api.reports.revenue_by_payment.path}?from=${from}&to=${to}`;
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch payment revenue');
+      return api.reports.revenue_by_payment.responses[200].parse(await res.json());
+    }
+  });
+
+  const loading = summary.isLoading || byPayment.isLoading;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <Label className="text-sm">Range</Label>
+          <Select value={preset} onValueChange={(v: any) => setPreset(v)}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Select range" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="week">This Week</SelectItem>
+              <SelectItem value="month">This Month</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {preset === 'custom' && (
+          <>
+            <div>
+              <Label className="text-sm">From</Label>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-[180px]" />
+            </div>
+            <div>
+              <Label className="text-sm">To</Label>
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-[180px]" />
+            </div>
+          </>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className="p-4">
+              <div className="text-sm text-muted-foreground">Total Revenue</div>
+              <div className="text-2xl font-display">{`NPR ${Number(summary.data?.totalRevenue || 0).toLocaleString()}`}</div>
+            </Card>
+            <Card className="p-4">
+              <div className="text-sm text-muted-foreground">Cash Received</div>
+              <div className="text-2xl font-display">{`NPR ${Number(summary.data?.cashReceived || 0).toLocaleString()}`}</div>
+            </Card>
+            <Card className="p-4">
+              <div className="text-sm text-muted-foreground">Card Received</div>
+              <div className="text-2xl font-display">{`NPR ${Number(summary.data?.cardReceived || 0).toLocaleString()}`}</div>
+            </Card>
+            <Card className="p-4">
+              <div className="text-sm text-muted-foreground">Credit Sales</div>
+              <div className="text-2xl font-display">{`NPR ${Number(summary.data?.creditSales || 0).toLocaleString()}`}</div>
+            </Card>
+          </div>
+
+          <div className="overflow-x-auto">
+              <h3 className="text-lg font-bold mb-2">Revenue by Payment Type</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Payment Method</th>
+                    <th className="py-2 text-right">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(byPayment.data || []).map((row: any) => (
+                    <tr key={row.method} className="border-b">
+                      <td className="py-2">{row.method}</td>
+                      <td className="py-2 text-right">{`NPR ${Number(row.revenue).toLocaleString()}`}</td>
+                    </tr>
+                  ))}
+                  {(byPayment.data || []).length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="py-6 text-center text-muted-foreground">No sales in selected range</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+          </div>
+        </>
+      )}
+    </div>
   );
 }

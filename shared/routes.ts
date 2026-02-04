@@ -423,6 +423,7 @@ export const api = {
     list: {
       method: 'GET' as const,
       path: '/api/receivables',
+      input: z.object({ status: z.enum(['OPEN','SETTLED']).optional() }).optional(),
       responses: {
         200: z.array(z.custom<typeof receivables.$inferSelect & { customer: typeof customers.$inferSelect }>()),
       },
@@ -444,6 +445,55 @@ export const api = {
       responses: {
         200: z.custom<typeof receivables.$inferSelect>(),
         400: errorSchemas.validation,
+      },
+    },
+  },
+  reports: {
+    revenue_by_item: {
+      method: 'GET' as const,
+      path: '/api/reports/revenue-by-item',
+      input: z.object({
+        from: z.string(),
+        to: z.string(),
+        sort: z.enum(['asc','desc']).optional(),
+      }).optional(),
+      responses: {
+        200: z.array(z.object({
+          itemId: z.number(),
+          name: z.string(),
+          quantity: z.number(),
+          revenue: z.number(),
+        })),
+      },
+    },
+    revenue_summary: {
+      method: 'GET' as const,
+      path: '/api/reports/revenue-summary',
+      input: z.object({
+        from: z.string(),
+        to: z.string(),
+      }).optional(),
+      responses: {
+        200: z.object({
+          totalRevenue: z.number(),
+          cashReceived: z.number(),
+          cardReceived: z.number(),
+          creditSales: z.number(),
+        }),
+      },
+    },
+    revenue_by_payment: {
+      method: 'GET' as const,
+      path: '/api/reports/revenue-by-payment',
+      input: z.object({
+        from: z.string(),
+        to: z.string(),
+      }).optional(),
+      responses: {
+        200: z.array(z.object({
+          method: z.enum(['CASH','CARD','CREDIT']),
+          revenue: z.number(),
+        })),
       },
     },
   },

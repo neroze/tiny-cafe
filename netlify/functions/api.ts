@@ -460,7 +460,8 @@ export const handler: Handler = async (event) => {
 
     // Receivables
     if (method === "GET" && path === api.receivables.list.path) {
-      const list = await storage.getReceivables();
+      const status = (qp.status as string | undefined) as any;
+      const list = await storage.getReceivables(status);
       return json(200, list);
     }
 
@@ -480,6 +481,32 @@ export const handler: Handler = async (event) => {
         if (err instanceof z.ZodError) return json(400, { message: err.message });
         return json(400, { message: err.message || "Failed to record payment" });
       }
+    }
+
+    // Reports
+    if (method === "GET" && path === api.reports.revenue_by_item.path) {
+      const from = qp.from ? new Date(`${qp.from}T00:00:00`) : undefined;
+      const to = qp.to ? new Date(`${qp.to}T00:00:00`) : undefined;
+      const sort = (qp.sort as 'asc'|'desc' | undefined) || 'desc';
+      if (!from || !to) return json(400, { message: "from and to are required" });
+      const data = await storage.getRevenueByItem(from, to, sort);
+      return json(200, data);
+    }
+
+    if (method === "GET" && path === api.reports.revenue_summary.path) {
+      const from = qp.from ? new Date(`${qp.from}T00:00:00`) : undefined;
+      const to = qp.to ? new Date(`${qp.to}T00:00:00`) : undefined;
+      if (!from || !to) return json(400, { message: "from and to are required" });
+      const data = await storage.getRevenueSummary(from, to);
+      return json(200, data);
+    }
+
+    if (method === "GET" && path === api.reports.revenue_by_payment.path) {
+      const from = qp.from ? new Date(`${qp.from}T00:00:00`) : undefined;
+      const to = qp.to ? new Date(`${qp.to}T00:00:00`) : undefined;
+      if (!from || !to) return json(400, { message: "from and to are required" });
+      const data = await storage.getRevenueByPayment(from, to);
+      return json(200, data);
     }
 
     return json(404, { message: "Not found" });

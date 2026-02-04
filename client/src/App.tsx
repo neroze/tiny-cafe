@@ -12,6 +12,7 @@ import MenuItems from "@/pages/menu";
 import StockManagement from "@/pages/stock";
 import ExpensesPage from "@/pages/expenses";
 import RecipesPage from "@/pages/recipes";
+import RevenueByItemPage from "@/pages/revenue-by-item";
 
 function Router() {
   return (
@@ -23,6 +24,7 @@ function Router() {
       <Route path="/stock" component={StockManagement} />
       <Route path="/expenses" component={ExpensesPage} />
       <Route path="/recipes" component={RecipesPage} />
+      <Route path="/reports/revenue-by-item" component={RevenueByItemPage} />
       <Route component={NotFound} />
     </Switch>
   );

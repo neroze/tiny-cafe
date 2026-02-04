@@ -48,6 +48,11 @@ export interface IStorage {
     sales: (Sale & { item: Item })[];
   }>;
 
+  // Reports
+  getRevenueByItem(from: Date, to: Date, sort?: 'asc'|'desc'): Promise<{ itemId: number; name: string; quantity: number; revenue: number }[]>;
+  getRevenueSummary(from: Date, to: Date): Promise<{ totalRevenue: number; cashReceived: number; cardReceived: number; creditSales: number }>;
+  getRevenueByPayment(from: Date, to: Date): Promise<{ method: 'CASH'|'CARD'|'CREDIT'; revenue: number }[]>;
+
   // Stock
   getStock(date?: Date): Promise<(Stock & { item: Item })[]>;
   recordStockTransaction(data: CreateStockTransactionRequest): Promise<Stock>;
@@ -104,7 +109,7 @@ export interface IStorage {
   // Customers & Receivables
   getCustomers(): Promise<Customer[]>;
   createCustomer(cust: InsertCustomer): Promise<Customer>;
-  getReceivables(): Promise<(Receivable & { customer: Customer })[]>;
+  getReceivables(status?: 'OPEN'|'SETTLED'): Promise<(Receivable & { customer: Customer })[]>;
   getReceivablesSummary(): Promise<{ totalOutstanding: number; byCustomer: { customerId: number; name: string; outstanding: number }[] }>;
   createReceivable(orderId: number, customerId: number, amount: number): Promise<Receivable>;
   recordPayment(receivableId: number, amount: number, method: 'CASH'|'CARD'): Promise<Receivable>;
@@ -1026,7 +1031,7 @@ export class DatabaseStorage implements IStorage {
     }
     
     const [closedOrder] = await db.update(orders)
-        .set({ status: 'CLOSED', closedAt: now })
+        .set({ status: 'CLOSED', closedAt: now, paymentType: paymentType || 'CASH' })
         .where(eq(orders.id, id))
         .returning();
         
@@ -1057,10 +1062,11 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async getReceivables(): Promise<(Receivable & { customer: Customer })[]> {
+  async getReceivables(status?: 'OPEN'|'SETTLED'): Promise<(Receivable & { customer: Customer })[]> {
     const rows = await db.select({ receivable: receivables, customer: customers })
       .from(receivables)
       .innerJoin(customers, eq(receivables.customerId, customers.id))
+      .where(status ? eq(receivables.status, status) : undefined)
       .orderBy(desc(receivables.createdAt));
     return rows.map(r => ({ ...(r.receivable as any), customer: r.customer })) as any;
   }
@@ -1083,6 +1089,74 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async getRevenueByItem(from: Date, to: Date, sort: 'asc'|'desc' = 'desc'): Promise<{ itemId: number; name: string; quantity: number; revenue: number }[]> {
+    const start = startOfDay(from);
+    const end = endOfDay(to);
+    const rows = await db.select({
+      itemId: items.id,
+      name: items.name,
+      quantity: sum(sales.quantity),
+      revenue: sum(sales.total),
+    })
+    .from(sales)
+    .innerJoin(items, eq(sales.itemId, items.id))
+    .innerJoin(orders, eq(sales.orderId, orders.id))
+    .where(and(gte(sales.date, start), lte(sales.date, end), eq(orders.status, 'CLOSED')))
+    .groupBy(items.id, items.name)
+    .orderBy(sort === 'asc' ? sum(sales.total) : desc(sum(sales.total)));
+
+    return rows.map(r => ({
+      itemId: Number(r.itemId),
+      name: r.name,
+      quantity: Number(r.quantity),
+      revenue: Number(r.revenue),
+    }));
+  }
+
+  async getRevenueSummary(from: Date, to: Date): Promise<{ totalRevenue: number; cashReceived: number; cardReceived: number; creditSales: number }> {
+    const start = startOfDay(from);
+    const end = endOfDay(to);
+
+    const totalRes = await db.select({ total: sum(sales.total) })
+      .from(sales)
+      .innerJoin(orders, eq(sales.orderId, orders.id))
+      .where(and(gte(sales.date, start), lte(sales.date, end), eq(orders.status, 'CLOSED')));
+    const totalRevenue = Number(totalRes[0]?.total) || 0;
+
+    const byPayment = await db.select({
+      method: orders.paymentType,
+      revenue: sum(sales.total),
+    })
+    .from(sales)
+    .innerJoin(orders, eq(sales.orderId, orders.id))
+    .where(and(gte(sales.date, start), lte(sales.date, end), eq(orders.status, 'CLOSED')))
+    .groupBy(orders.paymentType);
+
+    let cashReceived = 0, cardReceived = 0, creditSales = 0;
+    byPayment.forEach(r => {
+      const amt = Number(r.revenue) || 0;
+      if (r.method === 'CASH') cashReceived += amt;
+      else if (r.method === 'CARD') cardReceived += amt;
+      else if (r.method === 'CREDIT') creditSales += amt;
+    });
+
+    return { totalRevenue, cashReceived, cardReceived, creditSales };
+  }
+
+  async getRevenueByPayment(from: Date, to: Date): Promise<{ method: 'CASH'|'CARD'|'CREDIT'; revenue: number }[]> {
+    const start = startOfDay(from);
+    const end = endOfDay(to);
+    const rows = await db.select({
+      method: orders.paymentType,
+      revenue: sum(sales.total),
+    })
+    .from(sales)
+    .innerJoin(orders, eq(sales.orderId, orders.id))
+    .where(and(gte(sales.date, start), lte(sales.date, end), eq(orders.status, 'CLOSED')))
+    .groupBy(orders.paymentType);
+    return rows.map(r => ({ method: r.method as any, revenue: Number(r.revenue) || 0 }));
+  }
+
   async recordPayment(receivableId: number, amount: number, method: 'CASH'|'CARD'): Promise<Receivable> {
     const [rec] = await db.select().from(receivables).where(eq(receivables.id, receivableId));
     if (!rec) throw new Error('Receivable not found');
@@ -1090,15 +1164,20 @@ export class DatabaseStorage implements IStorage {
 
     await db.insert(payments).values({ receivableId, amount, method });
     const newOutstanding = Math.max(0, (rec.outstanding || 0) - amount);
-    const newStatus = newOutstanding === 0 ? 'CLOSED' : 'OPEN';
+    const newStatus = newOutstanding === 0 ? 'SETTLED' : 'OPEN';
 
     const [updated] = await db.update(receivables)
       .set({ outstanding: newOutstanding, status: newStatus, updatedAt: new Date() })
       .where(eq(receivables.id, receivableId))
       .returning();
 
-    const currentCash = Number((await this.getSetting('cash_balance')) || '0');
-    await this.setSetting('cash_balance', String(currentCash + amount));
+    if (method === 'CASH') {
+      const currentCash = Number((await this.getSetting('cash_balance')) || '0');
+      await this.setSetting('cash_balance', String(currentCash + amount));
+    } else {
+      const currentBank = Number((await this.getSetting('bank_balance')) || '0');
+      await this.setSetting('bank_balance', String(currentBank + amount));
+    }
 
     return updated;
   }

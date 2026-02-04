@@ -362,6 +362,44 @@ export async function registerRoutes(
       }
   });
 
+  // Reports
+  app.get(api.reports.revenue_by_item.path, async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : undefined;
+      const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : undefined;
+      const sort = (req.query.sort as 'asc'|'desc' | undefined) || 'desc';
+      if (!from || !to) return res.status(400).json({ message: "from and to are required" });
+      const data = await storage.getRevenueByItem(from, to, sort);
+      res.json(data);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.get(api.reports.revenue_summary.path, async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : undefined;
+      const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : undefined;
+      if (!from || !to) return res.status(400).json({ message: "from and to are required" });
+      const data = await storage.getRevenueSummary(from, to);
+      res.json(data);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.get(api.reports.revenue_by_payment.path, async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : undefined;
+      const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : undefined;
+      if (!from || !to) return res.status(400).json({ message: "from and to are required" });
+      const data = await storage.getRevenueByPayment(from, to);
+      res.json(data);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
   // Customers
   app.get(api.customers.list.path, async (_req, res) => {
     const customers = await storage.getCustomers();
@@ -380,8 +418,9 @@ export async function registerRoutes(
   });
 
   // Receivables
-  app.get(api.receivables.list.path, async (_req, res) => {
-    const list = await storage.getReceivables();
+  app.get(api.receivables.list.path, async (req, res) => {
+    const status = (req.query.status as string | undefined) as any;
+    const list = await storage.getReceivables(status);
     res.json(list);
   });
 

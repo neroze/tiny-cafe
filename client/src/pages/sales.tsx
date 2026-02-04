@@ -5,6 +5,7 @@ import { useTables } from "@/hooks/use-tables";
 import { useOrders, useCreateOrder, useAddItemToOrder, useRemoveItemFromOrder, useCloseOrder } from "@/hooks/use-orders";
 import { useCustomers, useCreateCustomer } from "@/hooks/use-customers";
 import { useItems } from "@/hooks/use-items";
+import { useReceivables, useRecordReceivablePayment } from "@/hooks/use-receivables";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -34,9 +35,10 @@ export default function SalesPage() {
       ) : (
         <div className="space-y-6">
           <Tabs defaultValue="orders">
-            <TabsList className="grid grid-cols-2 w-full max-w-md">
+            <TabsList className="grid grid-cols-3 w-full max-w-md">
               <TabsTrigger value="orders">Table Service</TabsTrigger>
               <TabsTrigger value="history">Sales History</TabsTrigger>
+              <TabsTrigger value="credit">Credit Settlement</TabsTrigger>
             </TabsList>
             <TabsContent value="orders" className="mt-6">
               <PageHeader 
@@ -66,6 +68,9 @@ export default function SalesPage() {
             </TabsContent>
             <TabsContent value="history" className="mt-6">
               <SalesHistory />
+            </TabsContent>
+            <TabsContent value="credit" className="mt-6">
+              <CreditSettlement />
             </TabsContent>
           </Tabs>
         </div>
@@ -465,6 +470,101 @@ function SalesHistory() {
           </form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function CreditSettlement() {
+  const { toast } = useToast();
+  const { data: receivables = [], isLoading } = useReceivables('OPEN');
+  const recordPayment = useRecordReceivablePayment();
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <PageHeader 
+        title="Credit Settlement" 
+        description="Receive payments for open credit receivables."
+      />
+
+      {receivables.length === 0 ? (
+        <div className="py-12 text-center text-muted-foreground bg-card rounded-xl border border-dashed">
+          No open receivables.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {receivables.map((r: any) => (
+            <ReceivableRow key={r.id} receivable={r} onPaid={() => toast({ title: "Payment recorded" })} isSubmitting={recordPayment.isPending} onSubmit={async (amount: number, method: 'CASH'|'CARD') => {
+              try {
+                await recordPayment.mutateAsync({ id: r.id, amount, method });
+              } catch (err: any) {
+                toast({ variant: "destructive", title: "Error", description: err.message });
+              }
+            }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReceivableRow({ receivable, onPaid, isSubmitting, onSubmit }: { receivable: any; onPaid: () => void; isSubmitting: boolean; onSubmit: (amount: number, method: 'CASH'|'CARD') => Promise<void> }) {
+  const [amount, setAmount] = useState<number>(Number(receivable.outstanding));
+  const [method, setMethod] = useState<'CASH'|'CARD'>('CASH');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (amount <= 0) return;
+    await onSubmit(amount, method);
+    onPaid();
+  };
+
+  return (
+    <div className="bg-card rounded-xl border border-border p-4">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <div className="font-bold">{receivable.customer?.name}</div>
+          <div className="text-sm text-muted-foreground">Receivable #{receivable.id}</div>
+          <div className="text-xs text-muted-foreground">Created {receivable.createdAt ? format(new Date(receivable.createdAt), 'MMM d, h:mm a') : ''}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-muted-foreground">Original</div>
+          <div className="font-bold">NPR {Number(receivable.amount).toLocaleString()}</div>
+          <div className="text-xs text-muted-foreground mt-1">Outstanding</div>
+          <div className="text-emerald-600 font-bold">NPR {Number(receivable.outstanding).toLocaleString()}</div>
+        </div>
+      </div>
+      <form onSubmit={handleSubmit} className="flex items-center gap-2">
+        <Input 
+          type="number" 
+          value={amount} 
+          onChange={e => setAmount(Number(e.target.value))} 
+          min={1}
+          max={Number(receivable.outstanding)}
+          placeholder="Amount"
+          className="w-[140px]"
+          required
+        />
+        <Select value={method} onValueChange={(v: any) => setMethod(v)}>
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="Method" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="CASH">Cash</SelectItem>
+            <SelectItem value="CARD">Card</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button type="submit" isLoading={isSubmitting}>
+          <CheckCircle className="w-4 h-4 mr-2" /> Receive
+        </Button>
+      </form>
     </div>
   );
 }

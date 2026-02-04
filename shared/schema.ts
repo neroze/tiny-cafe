@@ -29,6 +29,7 @@ export const orders = pgTable("orders", {
   tableId: integer("table_id").references(() => tables.id).notNull(),
   status: text("status").default("OPEN"), // OPEN, CLOSED, CANCELLED
   total: integer("total").default(0),
+  paymentType: text("payment_type").default("CASH"), // CASH, CARD, CREDIT
   createdAt: timestamp("created_at").defaultNow(),
   closedAt: timestamp("closed_at"),
 });

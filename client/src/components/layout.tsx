@@ -9,6 +9,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const links = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/reports/revenue-by-item", label: "Revenue Reports", icon: LayoutDashboard },
     { href: "/sales", label: "Sales & Orders", icon: Receipt },
     { href: "/tables", label: "Tables", icon: Users },
     { href: "/menu", label: "Menu Items", icon: Coffee },
