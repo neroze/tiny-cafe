@@ -391,11 +391,37 @@ function MenuSelection({ orderId }: { orderId: number }) {
 }
 
 function SalesHistory() {
-  const { data: sales = [], isLoading } = useSales({ limit: "50" });
-  const updateSale = useUpdateSale();
   const { toast } = useToast();
+  const updateSale = useUpdateSale();
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState<{ quantity: number; unitPrice: number; labels: string }>({ quantity: 1, unitPrice: 0, labels: "" });
+
+  const [preset, setPreset] = useState<'today'|'yesterday'|'week'|'month'|'custom'>('week');
+  const [from, setFrom] = useState<string>(() => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]);
+  const [to, setTo] = useState<string>(() => new Date().toISOString().split("T")[0]);
+
+  const salesParams = useMemo(() => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    if (preset === 'today') return { date: todayStr, limit: "200" };
+    if (preset === 'yesterday') {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return { date: d.toISOString().split("T")[0], limit: "200" };
+    }
+    if (preset === 'week') {
+      const d = new Date();
+      const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      return { from: start.toISOString().split("T")[0], to: todayStr, limit: "500" };
+    }
+    if (preset === 'month') {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { from: start.toISOString().split("T")[0], to: todayStr, limit: "1000" };
+    }
+    return { from, to, limit: "1000" };
+  }, [preset, from, to]);
+
+  const { data: sales = [], isLoading } = useSales(salesParams);
 
   const openEdit = (sale: any) => {
     setEditing(sale);
@@ -418,34 +444,120 @@ function SalesHistory() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+  // Avoid conditional returns before hooks to keep hook order stable
+
+  // Group by date then by table
+  const grouped = useMemo(() => {
+    const byDate: Record<string, any[]> = {};
+    sales.forEach((s: any) => {
+      const d = new Date(s.date);
+      const key = d.toISOString().split("T")[0];
+      if (!byDate[key]) byDate[key] = [];
+      byDate[key].push(s);
+    });
+    const result = Object.entries(byDate)
+      .sort(([a], [b]) => (a < b ? 1 : -1))
+      .map(([dateStr, rows]) => {
+        const byTable: Record<string, any[]> = {};
+        rows.forEach((r: any) => {
+          const tableLabel = r.table?.number ? `Table ${r.table.number}` : "No Table";
+          if (!byTable[tableLabel]) byTable[tableLabel] = [];
+          byTable[tableLabel].push(r);
+        });
+        return { dateStr, tables: Object.entries(byTable) };
+      });
+    return result;
+  }, [sales]);
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {sales.map((s: any) => (
-          <div key={s.id} className="bg-card rounded-xl border border-border p-4 flex items-center justify-between">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="text-sm">Preset</label>
+          <Select value={preset} onValueChange={(v: any) => setPreset(v)}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="Range" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="yesterday">Yesterday</SelectItem>
+              <SelectItem value="week">Last 7 days</SelectItem>
+              <SelectItem value="month">This Month</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {preset === 'custom' && (
+          <>
             <div>
-              <div className="font-medium">{s.item?.name}</div>
-              <div className="text-sm text-muted-foreground">{s.quantity} x NPR {Number(s.unitPrice).toLocaleString()}</div>
-              <div className="text-sm">NPR {Number(s.total).toLocaleString()}</div>
+              <label className="text-sm">From</label>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-[160px]" />
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => openEdit(s)}>
-                <Edit2 className="w-4 h-4 mr-2" /> Edit
-              </Button>
+            <div>
+              <label className="text-sm">To</label>
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-[160px]" />
             </div>
-          </div>
-        ))}
+          </>
+        )}
       </div>
 
-      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="py-2">Item</th>
+                <th className="py-2 text-right">Qty</th>
+                <th className="py-2 text-right">Unit Price</th>
+                <th className="py-2 text-right">Total</th>
+                <th className="py-2">Payment</th>
+                <th className="py-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {grouped.map(group => (
+                <>
+                  <tr key={`date-${group.dateStr}`} className="bg-muted/40">
+                    <td colSpan={6} className="py-2 px-2 font-medium">{format(new Date(group.dateStr), 'MMM d, yyyy')}</td>
+                  </tr>
+                  {group.tables.map(([tableLabel, rows]) => (
+                    <>
+                      <tr key={`table-${group.dateStr}-${tableLabel}`} className="bg-muted/20">
+                        <td colSpan={6} className="py-2 px-2 text-muted-foreground">{tableLabel}</td>
+                      </tr>
+                      {rows.map((s: any) => (
+                        <tr key={s.id} className="border-b">
+                          <td className="py-2">{s.item?.name}</td>
+                          <td className="py-2 text-right">{s.quantity}</td>
+                          <td className="py-2 text-right">{`NPR ${Number(s.unitPrice).toLocaleString()}`}</td>
+                          <td className="py-2 text-right">{`NPR ${Number(s.total).toLocaleString()}`}</td>
+                          <td className="py-2">{s.orderPaymentType || 'CASH'}</td>
+                          <td className="py-2 text-right">
+                            <Button variant="outline" onClick={() => openEdit(s)}>
+                              <Edit2 className="w-4 h-4 mr-2" /> Edit
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </>
+                  ))}
+                </>
+              ))}
+              {grouped.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-6 text-center text-muted-foreground">No sales in selected range</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+  <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Sale</DialogTitle>

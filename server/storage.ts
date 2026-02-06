@@ -143,7 +143,7 @@ export class DatabaseStorage implements IStorage {
     return this.getSalesWithLabels(date, limit);
   }
 
-  async getSalesWithLabels(date?: Date, limit: number = 50): Promise<(Sale & { item: Item })[]> {
+  async getSalesWithLabels(date?: Date, limit: number = 50): Promise<(Sale & { item: Item, table?: Table | null, orderPaymentType?: string })[]> {
     let query = db.select({
       id: sales.id,
       orderId: sales.orderId,
@@ -155,11 +155,14 @@ export class DatabaseStorage implements IStorage {
       labels: sales.labels,
       cogs: sales.cogs,
       createdAt: sales.createdAt,
-      item: items
+      item: items,
+      orderPaymentType: orders.paymentType,
+      table: tables
     })
     .from(sales)
     .innerJoin(items, eq(sales.itemId, items.id))
-    .leftJoin(orders, eq(sales.orderId, orders.id));
+    .leftJoin(orders, eq(sales.orderId, orders.id))
+    .leftJoin(tables, eq(orders.tableId, tables.id));
 
     const conditions = [or(isNull(sales.orderId), eq(orders.status, 'CLOSED'))];
 
@@ -172,7 +175,7 @@ export class DatabaseStorage implements IStorage {
     return await query.where(and(...conditions)).orderBy(desc(sales.date)).limit(limit) as any;
   }
 
-  async getSalesRange(from?: Date, to?: Date, limit: number = 500): Promise<(Sale & { item: Item })[]> {
+  async getSalesRange(from?: Date, to?: Date, limit: number = 500): Promise<(Sale & { item: Item, table?: Table | null, orderPaymentType?: string })[]> {
     const start = from ? startOfDay(from) : startOfMonth(new Date());
     const end = to ? endOfDay(to) : endOfDay(new Date());
     
@@ -187,11 +190,14 @@ export class DatabaseStorage implements IStorage {
       labels: sales.labels,
       cogs: sales.cogs,
       createdAt: sales.createdAt,
-      item: items
+      item: items,
+      orderPaymentType: orders.paymentType,
+      table: tables
     })
     .from(sales)
     .innerJoin(items, eq(sales.itemId, items.id))
     .leftJoin(orders, eq(sales.orderId, orders.id))
+    .leftJoin(tables, eq(orders.tableId, tables.id))
     .where(and(
       gte(sales.date, start), 
       lte(sales.date, end),
