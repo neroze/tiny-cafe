@@ -104,7 +104,7 @@ export interface IStorage {
   updateOrder(id: number, updates: Partial<InsertOrder>): Promise<Order>;
   addItemToOrder(orderId: number, item: InsertSale): Promise<Sale>;
   removeItemFromOrder(saleId: number): Promise<void>;
-  closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT', customerId?: number): Promise<Order>;
+  closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT'|'SPLIT', customerId?: number, cashAmount?: number): Promise<Order>;
 
   // Customers & Receivables
   getCustomers(): Promise<Customer[]>;
@@ -993,7 +993,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT', customerId?: number): Promise<Order> {
+  async closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT'|'SPLIT', customerId?: number, cashAmount?: number): Promise<Order> {
     const orderWithItems = await this.getOrder(id);
     if (!orderWithItems) throw new Error("Order not found");
     if (orderWithItems.status !== 'OPEN') throw new Error("Order is not open");
@@ -1036,8 +1036,48 @@ export class DatabaseStorage implements IStorage {
         await db.update(sales).set({ cogs: String(saleCogs) }).where(eq(sales.id, saleItem.id));
     }
     
+    const [existingOrder] = await db.select().from(orders).where(eq(orders.id, id));
+    if (!existingOrder) throw new Error('Order not found');
+    const total = Number(existingOrder.total || 0);
+
+    let newPaymentType = paymentType || 'CASH';
+    let newCashAmount = 0;
+    let newCreditAmount = 0;
+    let paymentStatus: 'PAID'|'PARTIAL'|'PENDING' = 'PAID';
+
+    if (newPaymentType === 'CASH') {
+      newCashAmount = total;
+      newCreditAmount = 0;
+      paymentStatus = 'PAID';
+    } else if (newPaymentType === 'CARD') {
+      newCashAmount = 0;
+      newCreditAmount = 0;
+      paymentStatus = 'PAID';
+    } else if (newPaymentType === 'CREDIT') {
+      newCashAmount = 0;
+      newCreditAmount = total;
+      if (!customerId) throw new Error('Customer is required for credit sales');
+      paymentStatus = 'PENDING';
+    } else if (newPaymentType === 'SPLIT') {
+      const cash = Number(cashAmount || 0);
+      if (cash < 0) throw new Error('Cash amount cannot be negative');
+      if (cash > total) throw new Error('Cash amount cannot exceed total');
+      newCashAmount = cash;
+      newCreditAmount = total - cash;
+      if (newCreditAmount > 0 && !customerId) {
+        const existing = await db.select().from(customers).where(eq(customers.name, 'Walk-in Credit')).limit(1);
+        let fallbackId = existing[0]?.id as number | undefined;
+        if (!fallbackId) {
+          const [created] = await db.insert(customers).values({ name: 'Walk-in Credit', phone: '' }).returning();
+          fallbackId = (created as any).id as number;
+        }
+        customerId = fallbackId;
+      }
+      paymentStatus = newCreditAmount > 0 ? 'PARTIAL' : 'PAID';
+    }
+
     const [closedOrder] = await db.update(orders)
-        .set({ status: 'CLOSED', closedAt: now, paymentType: paymentType || 'CASH' })
+        .set({ status: 'CLOSED', closedAt: now, paymentType: newPaymentType, paymentStatus, cashAmount: newCashAmount, creditAmount: newCreditAmount })
         .where(eq(orders.id, id))
         .returning();
         
@@ -1045,15 +1085,19 @@ export class DatabaseStorage implements IStorage {
         await db.update(tables).set({ status: 'empty' }).where(eq(tables.id, closedOrder.tableId));
     }
     
-    if (paymentType === 'CREDIT') {
-      if (!customerId) throw new Error('Customer is required for credit sales');
+    if (newPaymentType === 'CREDIT' || (newPaymentType === 'SPLIT' && (closedOrder.creditAmount || 0) > 0)) {
       await db.insert(receivables).values({
         orderId: closedOrder.id,
-        customerId,
-        amount: closedOrder.total || 0,
-        outstanding: closedOrder.total || 0,
+        customerId: customerId!,
+        amount: closedOrder.creditAmount || 0,
+        outstanding: closedOrder.creditAmount || 0,
         status: 'OPEN',
       });
+    }
+
+    if (newCashAmount > 0) {
+      const currentCash = Number((await this.getSetting('cash_balance')) || '0');
+      await this.setSetting('cash_balance', String(currentCash + newCashAmount));
     }
 
     return closedOrder;
@@ -1123,28 +1167,13 @@ export class DatabaseStorage implements IStorage {
     const start = startOfDay(from);
     const end = endOfDay(to);
 
-    const totalRes = await db.select({ total: sum(sales.total) })
-      .from(sales)
-      .innerJoin(orders, eq(sales.orderId, orders.id))
-      .where(and(gte(sales.date, start), lte(sales.date, end), eq(orders.status, 'CLOSED')));
-    const totalRevenue = Number(totalRes[0]?.total) || 0;
+    const closedOrders = await db.select().from(orders)
+      .where(and(eq(orders.status, 'CLOSED'), gte(orders.closedAt, start), lte(orders.closedAt, end)));
 
-    const byPayment = await db.select({
-      method: orders.paymentType,
-      revenue: sum(sales.total),
-    })
-    .from(sales)
-    .innerJoin(orders, eq(sales.orderId, orders.id))
-    .where(and(gte(sales.date, start), lte(sales.date, end), eq(orders.status, 'CLOSED')))
-    .groupBy(orders.paymentType);
-
-    let cashReceived = 0, cardReceived = 0, creditSales = 0;
-    byPayment.forEach(r => {
-      const amt = Number(r.revenue) || 0;
-      if (r.method === 'CASH') cashReceived += amt;
-      else if (r.method === 'CARD') cardReceived += amt;
-      else if (r.method === 'CREDIT') creditSales += amt;
-    });
+    const totalRevenue = closedOrders.reduce((sum: number, o: any) => sum + Number(o.total || 0), 0);
+    const cashReceived = closedOrders.reduce((sum: number, o: any) => sum + Number(o.cashAmount || 0), 0);
+    const creditSales = closedOrders.reduce((sum: number, o: any) => sum + Number(o.creditAmount || 0), 0);
+    const cardReceived = closedOrders.filter((o: any) => o.paymentType === 'CARD').reduce((sum: number, o: any) => sum + Number(o.total || 0), 0);
 
     return { totalRevenue, cashReceived, cardReceived, creditSales };
   }
@@ -1152,15 +1181,18 @@ export class DatabaseStorage implements IStorage {
   async getRevenueByPayment(from: Date, to: Date): Promise<{ method: 'CASH'|'CARD'|'CREDIT'; revenue: number }[]> {
     const start = startOfDay(from);
     const end = endOfDay(to);
-    const rows = await db.select({
-      method: orders.paymentType,
-      revenue: sum(sales.total),
-    })
-    .from(sales)
-    .innerJoin(orders, eq(sales.orderId, orders.id))
-    .where(and(gte(sales.date, start), lte(sales.date, end), eq(orders.status, 'CLOSED')))
-    .groupBy(orders.paymentType);
-    return rows.map(r => ({ method: r.method as any, revenue: Number(r.revenue) || 0 }));
+    const closedOrders = await db.select().from(orders)
+      .where(and(eq(orders.status, 'CLOSED'), gte(orders.closedAt, start), lte(orders.closedAt, end)));
+
+    const cashTotal = closedOrders.reduce((sum: number, o: any) => sum + Number(o.cashAmount || 0), 0);
+    const creditTotal = closedOrders.reduce((sum: number, o: any) => sum + Number(o.creditAmount || 0), 0);
+    const cardTotal = closedOrders.filter((o: any) => o.paymentType === 'CARD').reduce((sum: number, o: any) => sum + Number(o.total || 0), 0);
+
+    return [
+      { method: 'CASH', revenue: cashTotal },
+      { method: 'CARD', revenue: cardTotal },
+      { method: 'CREDIT', revenue: creditTotal },
+    ];
   }
 
   async recordPayment(receivableId: number, amount: number, method: 'CASH'|'CARD'): Promise<Receivable> {

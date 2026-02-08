@@ -1,3 +1,4 @@
+import * as React from "react";
 import { useState, useMemo } from "react";
 import { Layout } from "@/components/layout";
 import { PageHeader, Button, Card, Input } from "@/components/ui-components";
@@ -121,9 +122,11 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
   const { data: customers = [] } = useCustomers();
   const createCustomer = useCreateCustomer();
 
-  const [paymentType, setPaymentType] = useState<'CASH'|'CARD'|'CREDIT'>('CASH');
+  const [paymentType, setPaymentType] = useState<'CASH'|'CARD'|'CREDIT'|'SPLIT'>('CASH');
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [newCustomerName, setNewCustomerName] = useState("");
+  const [showSummary, setShowSummary] = useState(false);
+  const [cashReceived, setCashReceived] = useState<number>(0);
   
   const activeOrder = useMemo(() => 
     openOrders.find((o: any) => o.tableId === table.id),
@@ -142,15 +145,28 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
     }
   };
 
-  const handleCloseOrder = async () => {
+  const confirmClose = async () => {
     if (!activeOrder) return;
     try {
-      if (paymentType === 'CREDIT') {
+      const total = Number(activeOrder.total) || 0;
+      if (!paymentType) throw new Error("Select payment type");
+      if (paymentType === 'CASH') {
+        if (cashReceived < total) throw new Error("Cash received is less than total");
+        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType });
+      } else if (paymentType === 'CARD') {
+        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType });
+      } else if (paymentType === 'CREDIT') {
         if (!selectedCustomerId) throw new Error("Select customer for credit sale");
         await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType, customerId: selectedCustomerId });
       } else {
-        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType });
+        const cash = Number(cashReceived || 0);
+        if (cash < 0) throw new Error("Cash cannot be negative");
+        if (cash > total) throw new Error("Cash cannot exceed total");
+        const credit = total - cash;
+        if (credit > 0 && !selectedCustomerId) throw new Error("Select customer for split credit");
+        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType: 'SPLIT', customerId: selectedCustomerId || undefined, cashAmount: cash });
       }
+      setShowSummary(false);
       toast({ title: "Order Closed", description: `Order for Table ${table.number} has been finalized.` });
       onBack();
     } catch (err: any) {
@@ -198,9 +214,10 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                   <SelectItem value="CASH">Cash</SelectItem>
                   <SelectItem value="CARD">Card</SelectItem>
                   <SelectItem value="CREDIT">Credit</SelectItem>
+                  <SelectItem value="SPLIT">Split</SelectItem>
                 </SelectContent>
               </Select>
-              {paymentType === 'CREDIT' && (
+              {(paymentType === 'CREDIT' || (paymentType === 'SPLIT' && (Number(activeOrder.total) - Number(cashReceived) > 0))) && (
                 <div className="flex items-center gap-2">
                   <Select value={selectedCustomerId ? String(selectedCustomerId) : undefined} onValueChange={(v: any) => setSelectedCustomerId(Number(v))}>
                     <SelectTrigger className="w-[200px]">
@@ -230,7 +247,7 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
               )}
             </div>
             <Button 
-              onClick={handleCloseOrder}
+              onClick={() => setShowSummary(true)}
               isLoading={closeOrder.isPending}
             >
               <CheckCircle className="w-5 h-5 mr-2" />
@@ -278,6 +295,164 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
             <MenuSelection orderId={activeOrder.id} />
           </div>
         </div>
+      )}
+
+      {activeOrder && (
+        <Dialog open={showSummary} onOpenChange={(o) => setShowSummary(o)}>
+          <DialogContent className="max-w-2xl p-0">
+            <div className="p-6 space-y-4">
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Bill Summary</div>
+                <div className="flex flex-wrap items-center justify-between">
+                  <div className="font-bold">{`Table ${table.number}`}</div>
+                  <div className="text-sm">{new Date().toLocaleString()}</div>
+                </div>
+                <div className="text-sm text-muted-foreground">{`Order #${activeOrder.id}`}</div>
+              </div>
+
+              <div id="print-area" className="space-y-3">
+                <div className="space-y-2">
+                  {activeOrder.items.map((s: any) => (
+                    <div key={s.id} className="flex items-center justify-between">
+                      <div className="font-medium">{s.item?.name}</div>
+                      <div className="text-sm text-muted-foreground">{s.quantity} × {`NPR ${Number(s.unitPrice).toLocaleString()}`}</div>
+                      <div className="text-sm font-mono font-bold">{`NPR ${Number(s.total).toLocaleString()}`}</div>
+                    </div>
+                  ))}
+                  {activeOrder.items.length === 0 && (
+                    <div className="text-sm text-muted-foreground">No items</div>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-border space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <div>Subtotal</div>
+                    <div className="font-mono">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <div>Discount</div>
+                    <div className="font-mono">{`NPR 0`}</div>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <div>Tax</div>
+                    <div className="font-mono">{`NPR 0`}</div>
+                  </div>
+                  <div className="flex justify-between text-base font-bold">
+                    <div>Total</div>
+                    <div className="font-mono">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
+                  </div>
+                </div>
+                <div className="text-sm mt-2">Status: CLOSED</div>
+
+                <div className="pt-2 border-t border-border space-y-1">
+                  <div className="text-sm font-bold">Payment Breakdown</div>
+                  <div className="flex justify-between text-sm">
+                    <div>Cash Received</div>
+                    <div className="font-mono">{`NPR ${(() => {
+                      const total = Number(activeOrder.total) || 0;
+                      if (paymentType === 'CASH') return Number(total).toLocaleString();
+                      if (paymentType === 'SPLIT') return Number(cashReceived || 0).toLocaleString();
+                      return Number(0).toLocaleString();
+                    })()}`}</div>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <div>Balance Due</div>
+                    <div className="font-mono text-amber-600">{`NPR ${(() => {
+                      const total = Number(activeOrder.total) || 0;
+                      const credit = paymentType === 'SPLIT' ? Math.max(0, total - Number(cashReceived || 0)) : (paymentType === 'CREDIT' ? total : 0);
+                      return Number(credit).toLocaleString();
+                    })()}`}</div>
+                  </div>
+                  {(() => {
+                    const total = Number(activeOrder.total) || 0;
+                    const credit = paymentType === 'SPLIT' ? Math.max(0, total - Number(cashReceived || 0)) : (paymentType === 'CREDIT' ? total : 0);
+                    return credit > 0 ? (<div className="text-xs text-amber-600">Outstanding Balance Created</div>) : null;
+                  })()}
+                </div>
+
+                <div className="pt-2 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm">Payment Type</label>
+                      <Select value={paymentType} onValueChange={(v: any) => setPaymentType(v)}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Payment" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CASH">Cash</SelectItem>
+                          <SelectItem value="CARD">Card</SelectItem>
+                          <SelectItem value="CREDIT">Credit</SelectItem>
+                          <SelectItem value="SPLIT">Split Payment</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {paymentType === 'CASH' && (
+                      <div>
+                        <label className="text-sm">Amount Received</label>
+                        <Input type="number" value={cashReceived} onChange={(e) => setCashReceived(Number(e.target.value))} />
+                        <div className="text-xs text-muted-foreground mt-1">{`Balance: NPR ${Math.max(0, Number(cashReceived) - Number(activeOrder.total)).toLocaleString()}`}</div>
+                      </div>
+                    )}
+                    {paymentType === 'SPLIT' && (
+                      <div className="space-y-2">
+                        <div>
+                          <div className="text-sm">Total Amount</div>
+                          <div className="font-mono font-bold">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
+                        </div>
+                        <div>
+                          <label className="text-sm">Paid Now (Cash)</label>
+                          <Input type="number" value={cashReceived} onChange={(e) => setCashReceived(Number(e.target.value))} min={0} />
+                          <div className="text-xs text-muted-foreground mt-1">{`Remaining Balance: NPR ${Math.max(0, Number(activeOrder.total) - Number(cashReceived)).toLocaleString()}`}</div>
+                        </div>
+                        <div>
+                          <div className="text-sm">Pay Later (Credit)</div>
+                          <div className="font-mono text-amber-600 font-bold">{`NPR ${Math.max(0, Number(activeOrder.total) - Number(cashReceived)).toLocaleString()}`}</div>
+                        </div>
+                      </div>
+                    )}
+                    {paymentType === 'CREDIT' && (
+                      <div>
+                        <div className="text-sm">Amount Due</div>
+                        <div className="font-mono font-bold">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
+                        <div className="text-sm mt-2">Outstanding Balance</div>
+                        <div className="font-mono">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+                <div className="sticky bottom-0 p-4 border-t border-border bg-background flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={() => setShowSummary(false)}>Edit Order</Button>
+                    <Button variant="secondary" onClick={() => window.print()}>Print Bill</Button>
+                  </div>
+                  <div className="text-sm text-muted-foreground mr-4">
+                    {paymentType === 'SPLIT' && (
+                      <div>{`Sale will be closed. NPR ${Number(cashReceived || 0).toLocaleString()} received in cash. NPR ${Math.max(0, Number(activeOrder.total) - Number(cashReceived || 0)).toLocaleString()} will be recorded as credit.`}</div>
+                    )}
+                  </div>
+              <Button 
+                onClick={confirmClose}
+                disabled={
+                  !paymentType ||
+                  (paymentType === 'CASH' && cashReceived < Number(activeOrder.total)) ||
+                  (paymentType === 'CREDIT' && !selectedCustomerId) ||
+                  (paymentType === 'SPLIT' && (cashReceived < 0 || cashReceived > Number(activeOrder.total)))
+                }
+              >
+                Confirm & Close Sale
+              </Button>
+                </div>
+
+            <style>{`@media print {
+              body * { visibility: hidden; }
+              #print-area, #print-area * { visibility: visible; }
+              #print-area { position: absolute; left: 0; top: 0; width: 80mm; color: #000; }
+            }`}</style>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
@@ -396,32 +571,31 @@ function SalesHistory() {
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState<{ quantity: number; unitPrice: number; labels: string }>({ quantity: 1, unitPrice: 0, labels: "" });
 
-  const [preset, setPreset] = useState<'today'|'yesterday'|'week'|'month'|'custom'>('week');
+  const [preset, setPreset] = useState<'today'|'week'|'month'|'custom'>('week');
   const [from, setFrom] = useState<string>(() => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]);
   const [to, setTo] = useState<string>(() => new Date().toISOString().split("T")[0]);
+  const [tableFilter, setTableFilter] = useState<string>('all');
+  const [tab, setTab] = useState<'items'|'date'|'payment'>('items');
+  const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
+  const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({});
 
   const salesParams = useMemo(() => {
     const todayStr = new Date().toISOString().split("T")[0];
     if (preset === 'today') return { date: todayStr, limit: "200" };
-    if (preset === 'yesterday') {
-      const d = new Date();
-      d.setDate(d.getDate() - 1);
-      return { date: d.toISOString().split("T")[0], limit: "200" };
-    }
     if (preset === 'week') {
-      const d = new Date();
       const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      return { from: start.toISOString().split("T")[0], to: todayStr, limit: "500" };
+      return { from: start.toISOString().split("T")[0], to: todayStr, limit: "2000" };
     }
     if (preset === 'month') {
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { from: start.toISOString().split("T")[0], to: todayStr, limit: "1000" };
+      return { from: start.toISOString().split("T")[0], to: todayStr, limit: "5000" };
     }
-    return { from, to, limit: "1000" };
+    return { from, to, limit: "5000" };
   }, [preset, from, to]);
 
   const { data: sales = [], isLoading } = useSales(salesParams);
+  const { data: tables = [] } = useTables();
 
   const openEdit = (sale: any) => {
     setEditing(sale);
@@ -446,31 +620,73 @@ function SalesHistory() {
 
   // Avoid conditional returns before hooks to keep hook order stable
 
-  // Group by date then by table
-  const grouped = useMemo(() => {
+  const filteredSales = useMemo(() => {
+    if (tableFilter === 'all') return sales;
+    if (tableFilter === 'none') return sales.filter((s: any) => !s.table?.id);
+    const tid = Number(tableFilter);
+    return sales.filter((s: any) => s.table?.id === tid);
+  }, [sales, tableFilter]);
+
+  const byDateGroups = useMemo(() => {
     const byDate: Record<string, any[]> = {};
-    sales.forEach((s: any) => {
-      const d = new Date(s.date);
-      const key = d.toISOString().split("T")[0];
+    filteredSales.forEach((s: any) => {
+      const key = new Date(s.date).toISOString().split("T")[0];
       if (!byDate[key]) byDate[key] = [];
       byDate[key].push(s);
     });
-    const result = Object.entries(byDate)
-      .sort(([a], [b]) => (a < b ? 1 : -1))
-      .map(([dateStr, rows]) => {
-        const byTable: Record<string, any[]> = {};
-        rows.forEach((r: any) => {
-          const tableLabel = r.table?.number ? `Table ${r.table.number}` : "No Table";
-          if (!byTable[tableLabel]) byTable[tableLabel] = [];
-          byTable[tableLabel].push(r);
-        });
-        return { dateStr, tables: Object.entries(byTable) };
+    return Object.entries(byDate).sort(([a], [b]) => (a < b ? 1 : -1));
+  }, [filteredSales]);
+
+  const itemSummary = useMemo(() => {
+    const map = new Map<number, { name: string; quantity: number; revenue: number }>();
+    filteredSales.forEach((s: any) => {
+      const id = s.item?.id || s.itemId;
+      const name = s.item?.name || 'Unknown';
+      const prev = map.get(id) || { name, quantity: 0, revenue: 0 };
+      prev.quantity += Number(s.quantity) || 0;
+      prev.revenue += Number(s.total) || 0;
+      map.set(id, prev);
+    });
+    return Array.from(map.entries()).map(([itemId, v]) => ({ itemId, ...v })).sort((a, b) => b.revenue - a.revenue);
+  }, [filteredSales]);
+
+  const kpis = useMemo(() => {
+    const totalRevenue = filteredSales.reduce((sum: number, s: any) => sum + Number(s.total || 0), 0);
+    const totalOrders = (() => {
+      const ids = new Set<string>();
+      filteredSales.forEach((s: any) => {
+        if (s.orderId) ids.add(`order-${s.orderId}`);
+        else ids.add(`sale-${s.id}`);
       });
-    return result;
-  }, [sales]);
+      return ids.size;
+    })();
+    const avgOrderValue = totalOrders ? Math.round(totalRevenue / totalOrders) : 0;
+    const totalCogs = filteredSales.reduce((sum: number, s: any) => sum + Number(s.cogs || 0), 0);
+    const grossProfit = totalRevenue - totalCogs;
+    return { totalRevenue, totalOrders, avgOrderValue, grossProfit };
+  }, [filteredSales]);
 
   return (
     <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <div className="rounded-xl border border-border p-4">
+          <div className="text-sm text-muted-foreground">Total Revenue</div>
+          <div className="text-2xl font-bold">{`NPR ${Number(kpis.totalRevenue).toLocaleString()}`}</div>
+        </div>
+        <div className="rounded-xl border border-border p-4">
+          <div className="text-sm text-muted-foreground">Total Orders</div>
+          <div className="text-2xl font-bold">{Number(kpis.totalOrders).toLocaleString()}</div>
+        </div>
+        <div className="rounded-xl border border-border p-4">
+          <div className="text-sm text-muted-foreground">Avg Order Value</div>
+          <div className="text-2xl font-bold">{`NPR ${Number(kpis.avgOrderValue).toLocaleString()}`}</div>
+        </div>
+        <div className="rounded-xl border border-border p-4">
+          <div className="text-sm text-muted-foreground">Gross Profit</div>
+          <div className="text-2xl font-bold">{`NPR ${Number(kpis.grossProfit).toLocaleString()}`}</div>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className="text-sm">Preset</label>
@@ -480,10 +696,24 @@ function SalesHistory() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="yesterday">Yesterday</SelectItem>
               <SelectItem value="week">Last 7 days</SelectItem>
               <SelectItem value="month">This Month</SelectItem>
               <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="text-sm">Table</label>
+          <Select value={tableFilter} onValueChange={(v: any) => setTableFilter(v)}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="All" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Tables</SelectItem>
+              <SelectItem value="none">No Table</SelectItem>
+              {tables.map((t: any) => (
+                <SelectItem key={t.id} value={String(t.id)}>{`Table ${t.number}`}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -501,55 +731,162 @@ function SalesHistory() {
         )}
       </div>
 
-      {isLoading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
+      <div className="mt-4">
+        <Tabs defaultValue="items" value={tab} onValueChange={(v: any) => setTab(v)}>
+          <TabsList className="grid grid-cols-3 w-full max-w-md">
+            <TabsTrigger value="items">By Menu Item</TabsTrigger>
+            <TabsTrigger value="date">By Date</TabsTrigger>
+            <TabsTrigger value="payment">By Payment Type</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="items" className="mt-4 space-y-3">
+            {itemSummary.map(row => {
+              const isOpen = !!expandedItems[row.itemId];
+              const toggle = () => setExpandedItems(prev => ({ ...prev, [row.itemId]: !isOpen }));
+              const salesForItem = filteredSales.filter((s: any) => (s.item?.id || s.itemId) === row.itemId);
+              const dateGroups = Object.entries(
+                salesForItem.reduce((acc: Record<string, any[]>, s: any) => {
+                  const key = new Date(s.date).toISOString().split('T')[0];
+                  (acc[key] ||= []).push(s);
+                  return acc;
+                }, {})
+              ).sort(([a],[b]) => (a < b ? 1 : -1));
+
+              return (
+                <div key={row.itemId} className="rounded-xl border border-border p-4">
+                  <button onClick={toggle} className="w-full text-left">
+                    <div className="flex justify-between items-center">
+                      <div className="font-bold">{row.name}</div>
+                      <div className="text-sm text-muted-foreground">Orders: {salesForItem.length}</div>
+                    </div>
+                    <div className="mt-1 flex justify-between">
+                      <div className="text-sm">Qty: {Number(row.quantity).toLocaleString()}</div>
+                      <div className="text-sm font-bold">Revenue: {`NPR ${Number(row.revenue).toLocaleString()}`}</div>
+                    </div>
+                  </button>
+
+                  {isOpen && (
+                    <div className="mt-3 space-y-2">
+                      {dateGroups.map(([dateStr, rows]) => (
+                        <div key={dateStr}>
+                          <div className="text-xs text-muted-foreground mb-1">{format(new Date(dateStr), 'MMM d, yyyy')}</div>
+                          <div className="space-y-1">
+                            {(rows as any[]).map((s: any) => (
+                              <div key={s.id} className="flex justify-between text-sm">
+                                <div>{s.quantity} × {`NPR ${Number(s.unitPrice).toLocaleString()}`}</div>
+                                <div className="text-muted-foreground">{s.orderPaymentType || 'CASH'}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {itemSummary.length === 0 && (
+              <div className="py-6 text-center text-muted-foreground">No sales in selected range</div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="date" className="mt-4 space-y-3">
+            {byDateGroups.map(([dateStr, rows]) => {
+              const dayRevenue = (rows as any[]).reduce((sum: number, s: any) => sum + Number(s.total || 0), 0);
+              const isOpen = !!expandedDates[dateStr];
+              const toggle = () => setExpandedDates(prev => ({ ...prev, [dateStr]: !isOpen }));
+              const itemsMap = (rows as any[]).reduce((acc: Record<string, { qty: number; revenue: number }>, s: any) => {
+                const name = s.item?.name || 'Unknown';
+                const prev = acc[name] || { qty: 0, revenue: 0 };
+                prev.qty += Number(s.quantity || 0);
+                prev.revenue += Number(s.total || 0);
+                acc[name] = prev;
+                return acc;
+              }, {});
+              const items = Object.entries(itemsMap).sort((a, b) => b[1].revenue - a[1].revenue);
+
+              return (
+                <div key={dateStr} className="rounded-xl border border-border p-4">
+                  <button onClick={toggle} className="w-full text-left">
+                    <div className="flex justify-between items-center">
+                      <div className="font-bold">{format(new Date(dateStr), 'EEE, MMM d')}</div>
+                      <div className="text-sm font-bold">{`NPR ${Number(dayRevenue).toLocaleString()}`}</div>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="mt-3 space-y-1">
+                      {items.map(([name, v]) => (
+                        <div key={name} className="flex justify-between text-sm">
+                          <div>{name}</div>
+                          <div className="text-muted-foreground">{v.qty} • {`NPR ${Number(v.revenue).toLocaleString()}`}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {byDateGroups.length === 0 && (
+              <div className="py-6 text-center text-muted-foreground">No sales in selected range</div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="payment" className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {['CASH','CARD','CREDIT'].map((method) => {
+              const total = filteredSales.filter((s: any) => (s.orderPaymentType || 'CASH') === method).reduce((sum: number, s: any) => sum + Number(s.total || 0), 0);
+              return (
+                <div key={method} className="rounded-xl border border-border p-4">
+                  <div className="text-sm text-muted-foreground">{method}</div>
+                  <div className="text-xl font-bold">{`NPR ${Number(total).toLocaleString()}`}</div>
+                </div>
+              );
+            })}
+          </TabsContent>
+        </Tabs>
+      </div>
+
+       {isLoading ? (
+         <div className="flex justify-center py-12">
+           <Loader2 className="h-8 w-8 animate-spin text-primary" />
+         </div>
+       ) : (
+        <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+          <table className="w-full">
             <thead>
-              <tr className="text-left border-b">
-                <th className="py-2">Item</th>
-                <th className="py-2 text-right">Qty</th>
-                <th className="py-2 text-right">Unit Price</th>
-                <th className="py-2 text-right">Total</th>
-                <th className="py-2">Payment</th>
-                <th className="py-2 text-right">Actions</th>
+              <tr className="text-left border-b border-border">
+                <th className="py-3 px-4 text-xs sm:text-sm font-medium text-muted-foreground">Item</th>
+                <th className="py-3 px-4 text-xs sm:text-sm font-medium text-muted-foreground text-right">Qty</th>
+                <th className="py-3 px-4 text-xs sm:text-sm font-medium text-muted-foreground text-right">Unit Price</th>
+                <th className="py-3 px-4 text-xs sm:text-sm font-medium text-muted-foreground text-right">Total</th>
+                <th className="py-3 px-4 text-xs sm:text-sm font-medium text-muted-foreground">Payment</th>
+                <th className="py-3 px-4 text-xs sm:text-sm font-medium text-muted-foreground text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {grouped.map(group => (
-                <>
-                  <tr key={`date-${group.dateStr}`} className="bg-muted/40">
-                    <td colSpan={6} className="py-2 px-2 font-medium">{format(new Date(group.dateStr), 'MMM d, yyyy')}</td>
+              {byDateGroups.map((sub) => (
+                <React.Fragment key={`group-${sub[0] as string}`}>
+                  <tr className="bg-muted/30">
+                    <td colSpan={6} className="py-3 px-4 font-semibold tracking-wide text-foreground">{format(new Date(sub[0] as string), 'MMM d, yyyy')}</td>
                   </tr>
-                  {group.tables.map(([tableLabel, rows]) => (
-                    <>
-                      <tr key={`table-${group.dateStr}-${tableLabel}`} className="bg-muted/20">
-                        <td colSpan={6} className="py-2 px-2 text-muted-foreground">{tableLabel}</td>
-                      </tr>
-                      {rows.map((s: any) => (
-                        <tr key={s.id} className="border-b">
-                          <td className="py-2">{s.item?.name}</td>
-                          <td className="py-2 text-right">{s.quantity}</td>
-                          <td className="py-2 text-right">{`NPR ${Number(s.unitPrice).toLocaleString()}`}</td>
-                          <td className="py-2 text-right">{`NPR ${Number(s.total).toLocaleString()}`}</td>
-                          <td className="py-2">{s.orderPaymentType || 'CASH'}</td>
-                          <td className="py-2 text-right">
-                            <Button variant="outline" onClick={() => openEdit(s)}>
-                              <Edit2 className="w-4 h-4 mr-2" /> Edit
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </>
+                  {(sub[1] as any[]).map((s: any) => (
+                    <tr key={s.id} className="border-b border-border hover:bg-muted/20">
+                      <td className="py-3 px-4 text-base">{s.item?.name}</td>
+                      <td className="py-3 px-4 text-right text-base font-medium">{s.quantity}</td>
+                      <td className="py-3 px-4 text-right text-base font-mono">{`NPR ${Number(s.unitPrice).toLocaleString()}`}</td>
+                      <td className="py-3 px-4 text-right text-base font-mono font-bold">{`NPR ${Number(s.total).toLocaleString()}`}</td>
+                      <td className="py-3 px-4 text-base">{s.orderPaymentType || 'CASH'}</td>
+                      <td className="py-3 px-4 text-right">
+                        <Button variant="outline" onClick={() => openEdit(s)}>
+                          <Edit2 className="w-4 h-4 mr-2" /> Edit
+                        </Button>
+                      </td>
+                    </tr>
                   ))}
-                </>
+                </React.Fragment>
               ))}
-              {grouped.length === 0 && (
+              {byDateGroups.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-muted-foreground">No sales in selected range</td>
+                  <td colSpan={6} className="py-10 text-center text-muted-foreground">No sales in selected range</td>
                 </tr>
               )}
             </tbody>

@@ -114,9 +114,9 @@ export function useRemoveItemFromOrder() {
 export function useCloseOrder() {
     const queryClient = useQueryClient();
     return useMutation({
-        mutationFn: async ({ orderId, paymentType, customerId }: { orderId: number; paymentType: 'CASH'|'CARD'|'CREDIT'; customerId?: number }) => {
+        mutationFn: async ({ orderId, paymentType, customerId, cashAmount }: { orderId: number; paymentType: 'CASH'|'CARD'|'CREDIT'|'SPLIT'; customerId?: number; cashAmount?: number }) => {
             const url = buildUrl(api.orders.close.path, { id: orderId });
-            const payload = api.orders.close.input.parse({ paymentType, customerId });
+            const payload = api.orders.close.input.parse({ paymentType, customerId, cashAmount });
             const res = await fetch(url, {
                 method: api.orders.close.method,
                 headers: { "Content-Type": "application/json" },

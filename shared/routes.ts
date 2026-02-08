@@ -392,8 +392,9 @@ export const api = {
         method: 'POST' as const,
         path: '/api/orders/:id/close',
         input: z.object({
-          paymentType: z.enum(['CASH','CARD','CREDIT']),
+          paymentType: z.enum(['CASH','CARD','CREDIT','SPLIT']),
           customerId: z.number().optional(),
+          cashAmount: z.number().optional(),
         }),
         responses: {
             200: z.custom<typeof orders.$inferSelect>(),

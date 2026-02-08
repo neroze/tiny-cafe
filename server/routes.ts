@@ -355,7 +355,7 @@ export async function registerRoutes(
   app.post(api.orders.close.path, async (req, res) => {
       try {
           const input = api.orders.close.input.parse(req.body);
-          const order = await storage.closeOrder(Number(req.params.id), input.paymentType, input.customerId);
+          const order = await storage.closeOrder(Number(req.params.id), input.paymentType, input.customerId, input.cashAmount);
           res.json(order);
       } catch (err: any) {
           res.status(400).json({ message: err.message });
