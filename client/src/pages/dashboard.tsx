@@ -274,8 +274,8 @@ export default function Dashboard() {
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="flex gap-2">
-                  <Input 
-                    placeholder="New label name..." 
+                  <Input
+                    placeholder="New label name..."
                     value={newConfigLabel}
                     onChange={(e) => setNewConfigLabel(e.target.value)}
                     onKeyDown={(e) => {
@@ -284,8 +284,8 @@ export default function Dashboard() {
                       }
                     }}
                   />
-                  <Button 
-                    size="sm" 
+                  <Button
+                    size="sm"
                     onClick={() => newConfigLabel.trim() && addLabelMutation.mutate(newConfigLabel.trim())}
                     disabled={addLabelMutation.isPending}
                   >
@@ -296,7 +296,7 @@ export default function Dashboard() {
                   {configLabels.map((label: string) => (
                     <Badge key={label} variant="secondary" className="gap-1 px-2 py-1">
                       {label}
-                      <button 
+                      <button
                         className="hover:text-destructive"
                         onClick={() => deleteLabelMutation.mutate(label)}
                       >
@@ -324,8 +324,8 @@ export default function Dashboard() {
               </DialogHeader>
               <div className="space-y-4 py-4">
                 <div className="flex gap-2">
-                  <Input 
-                    placeholder="New category name..." 
+                  <Input
+                    placeholder="New category name..."
                     value={newConfigCategory}
                     onChange={(e) => setNewConfigCategory(e.target.value)}
                     onKeyDown={(e) => {
@@ -334,8 +334,8 @@ export default function Dashboard() {
                       }
                     }}
                   />
-                  <Button 
-                    size="sm" 
+                  <Button
+                    size="sm"
                     onClick={() => newConfigCategory.trim() && addCategoryMutation.mutate(newConfigCategory.trim())}
                     disabled={addCategoryMutation.isPending}
                   >
@@ -346,7 +346,7 @@ export default function Dashboard() {
                   {configCategories.map((cat: string) => (
                     <Badge key={cat} variant="secondary" className="gap-1 px-2 py-1">
                       {cat}
-                      <button 
+                      <button
                         className="hover:text-destructive"
                         onClick={() => deleteCategoryMutation.mutate(cat)}
                       >
@@ -398,9 +398,9 @@ export default function Dashboard() {
           description={`Target: NPR ${(targets?.quarterly || 200000).toLocaleString()}`}
           colorClass="text-purple-500"
         />
-  </div>
+      </div>
 
-  {profit && (
+      {profit && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatsCard
             title="Total Expenses"
@@ -453,25 +453,25 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis 
-                  dataKey="date" 
+                <XAxis
+                  dataKey="date"
                   axisLine={false}
                   tickLine={false}
                   tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
                   dy={10}
                 />
-                <YAxis 
+                <YAxis
                   axisLine={false}
                   tickLine={false}
                   tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
                   tickFormatter={(val) => `NPR ${val}`}
                 />
-                <Tooltip 
-                  contentStyle={{ 
-                    borderRadius: '12px', 
-                    border: '1px solid hsl(var(--border))', 
+                <Tooltip
+                  contentStyle={{
+                    borderRadius: '12px',
+                    border: '1px solid hsl(var(--border))',
                     backgroundColor: 'hsl(var(--background))',
-                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' 
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
                   }}
                   itemStyle={{ fontSize: '12px', fontWeight: 'bold' }}
                 />
@@ -539,7 +539,7 @@ export default function Dashboard() {
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}
                     formatter={(value: number) => `NPR ${value.toLocaleString()}`}
                   />
-                  <Legend verticalAlign="bottom" height={36}/>
+                  <Legend verticalAlign="bottom" height={36} />
                 </PieChart>
               </ResponsiveContainer>
               {safeStats.labelDistribution.length === 0 && (
@@ -559,7 +559,7 @@ export default function Dashboard() {
                 View Report <ArrowUpRight className="w-4 h-4" />
               </a>
             </div>
-            
+
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -571,7 +571,7 @@ export default function Dashboard() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {safeStats.topItems.map((item, i) => (
-                    <motion.tr 
+                    <motion.tr
                       key={item.name}
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
@@ -595,24 +595,31 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
-      </Card>
-    </div>
+          </Card>
+        </div>
 
-    <Card className="mt-8">
-      <h2 className="text-xl font-bold font-display mb-4">Revenue Reports</h2>
-      <RevenueReports />
-    </Card>
 
-    <div className="lg:col-span-1">
-      <Card className="h-full flex flex-col">
-        <h2 className="text-xl font-bold font-display mb-6">Sales Distribution</h2>
+
+
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-10">
+        <div className="lg:col-span-1">
+          <Card className="h-full flex flex-col relative">
+            <h2 className="text-xl font-bold font-display mb-4">Revenue Reports</h2>
+            <RevenueReports />
+          </Card>
+        </div>
+
+        <div className="lg:col-span-2">
+          <Card className="h-full flex flex-col relative">
+            <h2 className="text-xl font-bold font-display mb-6">Sales Distribution</h2>
             <div className="flex-1 min-h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
                   <XAxis type="number" hide />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={100} />
-                  <Tooltip 
-                    cursor={{fill: 'transparent'}}
+                  <Tooltip
+                    cursor={{ fill: 'transparent' }}
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}
                   />
                   <Bar dataKey="total" radius={[0, 4, 4, 0]} barSize={32}>
@@ -623,8 +630,8 @@ export default function Dashboard() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-      </Card>
-    </div>
+          </Card>
+        </div>
       </div>
     </Layout>
   );
@@ -633,7 +640,7 @@ export default function Dashboard() {
 // Moved RevenueByItemSection to a dedicated route component
 
 function RevenueReports() {
-  const [preset, setPreset] = React.useState<'today'|'week'|'month'|'custom'>('week');
+  const [preset, setPreset] = React.useState<'today' | 'week' | 'month' | 'custom'>('week');
   const [from, setFrom] = React.useState<string>(() => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]);
   const [to, setTo] = React.useState<string>(() => new Date().toISOString().split("T")[0]);
 
@@ -716,7 +723,7 @@ function RevenueReports() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
             <Card className="p-4">
               <div className="text-sm text-muted-foreground">Total Revenue</div>
               <div className="text-2xl font-display">{`NPR ${Number(summary.data?.totalRevenue || 0).toLocaleString()}`}</div>
@@ -736,28 +743,28 @@ function RevenueReports() {
           </div>
 
           <div className="overflow-x-auto">
-              <h3 className="text-lg font-bold mb-2">Revenue by Payment Type</h3>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left border-b">
-                    <th className="py-2">Payment Method</th>
-                    <th className="py-2 text-right">Revenue</th>
+            <h3 className="text-lg font-bold mb-2">Revenue by Payment Type</h3>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2">Payment Method</th>
+                  <th className="py-2 text-right">Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(byPayment.data || []).map((row: any) => (
+                  <tr key={row.method} className="border-b">
+                    <td className="py-2">{row.method}</td>
+                    <td className="py-2 text-right">{`NPR ${Number(row.revenue).toLocaleString()}`}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {(byPayment.data || []).map((row: any) => (
-                    <tr key={row.method} className="border-b">
-                      <td className="py-2">{row.method}</td>
-                      <td className="py-2 text-right">{`NPR ${Number(row.revenue).toLocaleString()}`}</td>
-                    </tr>
-                  ))}
-                  {(byPayment.data || []).length === 0 && (
-                    <tr>
-                      <td colSpan={2} className="py-6 text-center text-muted-foreground">No sales in selected range</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                ))}
+                {(byPayment.data || []).length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="py-6 text-center text-muted-foreground">No sales in selected range</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </>
       )}
