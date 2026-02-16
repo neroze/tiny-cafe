@@ -51,7 +51,8 @@ export interface IStorage {
   // Reports
   getRevenueByItem(from: Date, to: Date, sort?: 'asc'|'desc'): Promise<{ itemId: number; name: string; quantity: number; revenue: number }[]>;
   getRevenueSummary(from: Date, to: Date): Promise<{ totalRevenue: number; cashReceived: number; cardReceived: number; creditSales: number }>;
-  getRevenueByPayment(from: Date, to: Date): Promise<{ method: 'CASH'|'CARD'|'CREDIT'; revenue: number }[]>;
+  getRevenueByPayment(from: Date, to: Date): Promise<{ method: 'CASH'|'CARD'|'CREDIT'|'FOC'; revenue: number }[]>;
+  getFocSummary(from: Date, to: Date): Promise<{ totalFocValue: number; byItem: { itemId: number; name: string; count: number; value: number }[]; byReason: { reason: string; count: number; value: number }[]; byStaff: { staff: string; count: number; value: number }[] }>;
 
   // Stock
   getStock(date?: Date): Promise<(Stock & { item: Item })[]>;
@@ -104,7 +105,7 @@ export interface IStorage {
   updateOrder(id: number, updates: Partial<InsertOrder>): Promise<Order>;
   addItemToOrder(orderId: number, item: InsertSale): Promise<Sale>;
   removeItemFromOrder(saleId: number): Promise<void>;
-  closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT'|'SPLIT', customerId?: number, cashAmount?: number): Promise<Order>;
+  closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT'|'SPLIT'|'FOC', customerId?: number, cashAmount?: number): Promise<Order>;
 
   // Customers & Receivables
   getCustomers(): Promise<Customer[]>;
@@ -245,7 +246,32 @@ export class DatabaseStorage implements IStorage {
     // Fetch existing sale
     const [existing] = await db.select().from(sales).where(eq(sales.id, id)).limit(1);
     if (!existing) throw new Error("Sale not found");
-    const [updated] = await db.update(sales).set(updates).where(eq(sales.id, id)).returning();
+    const patch: any = { ...updates };
+    if ((updates as any).isFoc === true && existing.isFoc !== true) {
+      const currentTotal = Number(existing.total) || 0;
+      if ((updates as any).theoreticalValue === undefined) patch.theoreticalValue = currentTotal;
+      if (updates.total === undefined) patch.total = 0;
+      if (updates.unitPrice === undefined) {
+        const qty = Number(existing.quantity) || 1;
+        patch.unitPrice = 0;
+      }
+      patch.isFoc = true;
+    }
+    if ((updates as any).isFoc === false && existing.isFoc === true) {
+      const qty = Number(existing.quantity) || 1;
+      const restoreTotal = (updates as any).theoreticalValue !== undefined
+        ? Number((updates as any).theoreticalValue)
+        : Number(existing.theoreticalValue || 0);
+      if (updates.total === undefined) patch.total = restoreTotal;
+      if (updates.unitPrice === undefined) patch.unitPrice = Math.round(restoreTotal / qty);
+      patch.isFoc = false;
+    }
+    const [updated] = await db.update(sales).set(patch).where(eq(sales.id, id)).returning();
+    if (existing.orderId) {
+      const sumRows = await db.select({ total: sum(sales.total) }).from(sales).where(eq(sales.orderId, existing.orderId));
+      const newOrderTotal = Number(sumRows[0]?.total) || 0;
+      await db.update(orders).set({ total: newOrderTotal }).where(eq(orders.id, existing.orderId));
+    }
     
     // TODO: Handle inventory adjustment for sale updates correctly. 
     // Currently disabled to prevent pollution of stock table with menu items.
@@ -904,6 +930,10 @@ export class DatabaseStorage implements IStorage {
             quantity: sales.quantity,
             unitPrice: sales.unitPrice,
             total: sales.total,
+            isFoc: sales.isFoc,
+            focReason: sales.focReason,
+            focNote: sales.focNote,
+            theoreticalValue: sales.theoreticalValue,
             labels: sales.labels,
             cogs: sales.cogs,
             createdAt: sales.createdAt,
@@ -934,6 +964,10 @@ export class DatabaseStorage implements IStorage {
         quantity: sales.quantity,
         unitPrice: sales.unitPrice,
         total: sales.total,
+        isFoc: sales.isFoc,
+        focReason: sales.focReason,
+        focNote: sales.focNote,
+        theoreticalValue: sales.theoreticalValue,
         labels: sales.labels,
         cogs: sales.cogs,
         createdAt: sales.createdAt,
@@ -993,7 +1027,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT'|'SPLIT', customerId?: number, cashAmount?: number): Promise<Order> {
+  async closeOrder(id: number, paymentType?: 'CASH'|'CARD'|'CREDIT'|'SPLIT'|'FOC', customerId?: number, cashAmount?: number): Promise<Order> {
     const orderWithItems = await this.getOrder(id);
     if (!orderWithItems) throw new Error("Order not found");
     if (orderWithItems.status !== 'OPEN') throw new Error("Order is not open");
@@ -1045,6 +1079,25 @@ export class DatabaseStorage implements IStorage {
     let newCreditAmount = 0;
     let paymentStatus: 'PAID'|'PARTIAL'|'PENDING' = 'PAID';
 
+    if (newPaymentType === 'FOC') {
+      for (const saleItem of orderWithItems.items) {
+        const [curr] = await db.select().from(sales).where(eq(sales.id, saleItem.id)).limit(1);
+        if (!curr) continue;
+        if (!curr.isFoc) {
+          const restorePatch: any = {
+            isFoc: true,
+            theoreticalValue: Number(curr.total || 0),
+            unitPrice: 0,
+            total: 0,
+          };
+          await db.update(sales).set(restorePatch).where(eq(sales.id, curr.id));
+        }
+      }
+      const sumRows = await db.select({ total: sum(sales.total) }).from(sales).where(eq(sales.orderId, id));
+      const newOrderTotal = Number(sumRows[0]?.total) || 0;
+      await db.update(orders).set({ total: newOrderTotal }).where(eq(orders.id, id));
+    }
+
     if (newPaymentType === 'CASH') {
       newCashAmount = total;
       newCreditAmount = 0;
@@ -1074,6 +1127,10 @@ export class DatabaseStorage implements IStorage {
         customerId = fallbackId;
       }
       paymentStatus = newCreditAmount > 0 ? 'PARTIAL' : 'PAID';
+    } else if (newPaymentType === 'FOC') {
+      newCashAmount = 0;
+      newCreditAmount = 0;
+      paymentStatus = 'PAID';
     }
 
     const [closedOrder] = await db.update(orders)
@@ -1178,7 +1235,7 @@ export class DatabaseStorage implements IStorage {
     return { totalRevenue, cashReceived, cardReceived, creditSales };
   }
 
-  async getRevenueByPayment(from: Date, to: Date): Promise<{ method: 'CASH'|'CARD'|'CREDIT'; revenue: number }[]> {
+  async getRevenueByPayment(from: Date, to: Date): Promise<{ method: 'CASH'|'CARD'|'CREDIT'|'FOC'; revenue: number }[]> {
     const start = startOfDay(from);
     const end = endOfDay(to);
     const closedOrders = await db.select().from(orders)
@@ -1187,12 +1244,57 @@ export class DatabaseStorage implements IStorage {
     const cashTotal = closedOrders.reduce((sum: number, o: any) => sum + Number(o.cashAmount || 0), 0);
     const creditTotal = closedOrders.reduce((sum: number, o: any) => sum + Number(o.creditAmount || 0), 0);
     const cardTotal = closedOrders.filter((o: any) => o.paymentType === 'CARD').reduce((sum: number, o: any) => sum + Number(o.total || 0), 0);
+    const focTotal = closedOrders.filter((o: any) => o.paymentType === 'FOC').reduce((sum: number, o: any) => sum + Number(o.total || 0), 0);
 
     return [
       { method: 'CASH', revenue: cashTotal },
       { method: 'CARD', revenue: cardTotal },
       { method: 'CREDIT', revenue: creditTotal },
+      { method: 'FOC', revenue: focTotal },
     ];
+  }
+
+  async getFocSummary(from: Date, to: Date): Promise<{ totalFocValue: number; byItem: { itemId: number; name: string; count: number; value: number }[]; byReason: { reason: string; count: number; value: number }[]; byStaff: { staff: string; count: number; value: number }[] }> {
+    const start = startOfDay(from);
+    const end = endOfDay(to);
+    const rows = await db.select({
+      id: sales.id,
+      itemId: sales.itemId,
+      foc: sales.isFoc,
+      reason: sales.focReason,
+      note: sales.focNote,
+      theoreticalValue: sales.theoreticalValue,
+      item: items,
+      order: orders,
+    })
+    .from(sales)
+    .innerJoin(items, eq(sales.itemId, items.id))
+    .leftJoin(orders, eq(sales.orderId, orders.id))
+    .where(and(gte(sales.date, start), lte(sales.date, end), eq(sales.isFoc, true)));
+
+    const totalFocValue = rows.reduce((sum: number, r: any) => sum + Number(r.theoreticalValue || 0), 0);
+    const byItemMap = new Map<number, { itemId: number; name: string; count: number; value: number }>();
+    const byReasonMap = new Map<string, { reason: string; count: number; value: number }>();
+    for (const r of rows as any[]) {
+      const key = Number(r.itemId);
+      const name = r.item?.name as string;
+      const val = Number(r.theoreticalValue || 0);
+      const itemAgg = byItemMap.get(key) || { itemId: key, name, count: 0, value: 0 };
+      itemAgg.count += 1;
+      itemAgg.value += val;
+      byItemMap.set(key, itemAgg);
+
+      const reasonKey = (r.reason || '').trim() || 'Unspecified';
+      const reasonAgg = byReasonMap.get(reasonKey) || { reason: reasonKey, count: 0, value: 0 };
+      reasonAgg.count += 1;
+      reasonAgg.value += val;
+      byReasonMap.set(reasonKey, reasonAgg);
+    }
+
+    const byItem = Array.from(byItemMap.values()).sort((a, b) => b.value - a.value);
+    const byReason = Array.from(byReasonMap.values()).sort((a, b) => b.value - a.value);
+    const byStaff: { staff: string; count: number; value: number }[] = [];
+    return { totalFocValue, byItem, byReason, byStaff };
   }
 
   async recordPayment(receivableId: number, amount: number, method: 'CASH'|'CARD'): Promise<Receivable> {

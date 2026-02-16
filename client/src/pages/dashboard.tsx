@@ -684,7 +684,17 @@ function RevenueReports() {
     }
   });
 
-  const loading = summary.isLoading || byPayment.isLoading;
+  const focSummary = useQuery({
+    queryKey: [api.reports.foc_summary.path, from, to],
+    queryFn: async () => {
+      const url = `${api.reports.foc_summary.path}?from=${from}&to=${to}`;
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch FOC summary');
+      return api.reports.foc_summary.responses[200].parse(await res.json());
+    }
+  });
+
+  const loading = summary.isLoading || byPayment.isLoading || focSummary.isLoading;
 
   return (
     <div className="space-y-6">
@@ -742,7 +752,41 @@ function RevenueReports() {
             </Card>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="p-4">
+              <div className="text-sm text-muted-foreground">Total FOC Value</div>
+              <div className="text-2xl font-display">{`NPR ${Number(focSummary.data?.totalFocValue || 0).toLocaleString()}`}</div>
+              <div className="text-xs text-muted-foreground mt-1">Sum of theoretical prices for FOC items</div>
+            </Card>
+            <div className="overflow-x-auto">
+              <h3 className="text-lg font-bold mb-2">FOC by Item</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2">Item</th>
+                    <th className="py-2 text-right">Count</th>
+                    <th className="py-2 text-right">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(focSummary.data?.byItem || []).map((row: any) => (
+                    <tr key={row.itemId} className="border-b">
+                      <td className="py-2">{row.name}</td>
+                      <td className="py-2 text-right">{row.count}</td>
+                      <td className="py-2 text-right">{`NPR ${Number(row.value).toLocaleString()}`}</td>
+                    </tr>
+                  ))}
+                  {(focSummary.data?.byItem || []).length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-6 text-center text-muted-foreground">No FOC items in selected range</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto mt-6">
             <h3 className="text-lg font-bold mb-2">Revenue by Payment Type</h3>
             <table className="w-full text-sm">
               <thead>

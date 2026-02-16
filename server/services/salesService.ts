@@ -44,6 +44,10 @@ export async function updateSaleFromBody(id: number, body: any) {
     total: raw.total !== undefined ? Number(raw.total) : undefined,
     date: raw.date ? new Date(raw.date) : undefined,
     labels: raw.labels || undefined,
+    isFoc: raw.isFoc !== undefined ? Boolean(raw.isFoc) : undefined,
+    focReason: raw.focReason !== undefined ? String(raw.focReason) : undefined,
+    focNote: raw.focNote !== undefined ? String(raw.focNote) : undefined,
+    theoreticalValue: raw.theoreticalValue !== undefined ? Number(raw.theoreticalValue) : undefined,
   });
   return await storage.updateSale(id, updates as any);
 }

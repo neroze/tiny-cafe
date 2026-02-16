@@ -76,6 +76,7 @@ export function useUpdateSale() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.sales.list.path] });
       queryClient.invalidateQueries({ queryKey: [api.stock.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.orders.list.path] });
     },
   });
 }

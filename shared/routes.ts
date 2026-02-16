@@ -392,7 +392,7 @@ export const api = {
         method: 'POST' as const,
         path: '/api/orders/:id/close',
         input: z.object({
-          paymentType: z.enum(['CASH','CARD','CREDIT','SPLIT']),
+          paymentType: z.enum(['CASH','CARD','CREDIT','SPLIT','FOC']),
           customerId: z.number().optional(),
           cashAmount: z.number().optional(),
         }),
@@ -492,9 +492,25 @@ export const api = {
       }).optional(),
       responses: {
         200: z.array(z.object({
-          method: z.enum(['CASH','CARD','CREDIT']),
+          method: z.enum(['CASH','CARD','CREDIT','FOC']),
           revenue: z.number(),
         })),
+      },
+    },
+    foc_summary: {
+      method: 'GET' as const,
+      path: '/api/reports/foc-summary',
+      input: z.object({
+        from: z.string(),
+        to: z.string(),
+      }).optional(),
+      responses: {
+        200: z.object({
+          totalFocValue: z.number(),
+          byItem: z.array(z.object({ itemId: z.number(), name: z.string(), count: z.number(), value: z.number() })),
+          byReason: z.array(z.object({ reason: z.string(), count: z.number(), value: z.number() })),
+          byStaff: z.array(z.object({ staff: z.string(), count: z.number(), value: z.number() })),
+        }),
       },
     },
   },

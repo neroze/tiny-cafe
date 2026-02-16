@@ -46,6 +46,10 @@ export const sales = pgTable("sales", {
   unitPrice: integer("unit_price").notNull(), // Snapshot of price at sale time
   total: integer("total").notNull(),
   cogs: decimal("cogs", { precision: 12, scale: 2 }).default("0"),
+  isFoc: boolean("is_foc").default(false),
+  focReason: text("foc_reason").default(""),
+  focNote: text("foc_note").default(""),
+  theoreticalValue: integer("theoretical_value").default(0),
   labels: text("labels").array().default(sql`ARRAY[]::text[]`),
   createdAt: timestamp("created_at").defaultNow(),
 });

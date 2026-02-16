@@ -433,7 +433,7 @@ export const handler: Handler = async (event) => {
         const orderId = extractOrderId(path);
         if (!orderId || Number.isNaN(orderId)) return json(400, { message: "Invalid order id" });
         const input = api.orders.close.input.parse(body);
-        const order = await storage.closeOrder(orderId, input.paymentType, input.customerId);
+        const order = await storage.closeOrder(orderId, input.paymentType, input.customerId, (input as any).cashAmount);
         return json(200, order);
       } catch (err: any) {
         if (err instanceof z.ZodError) return json(400, { message: err.message });

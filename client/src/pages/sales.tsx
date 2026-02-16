@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, ArrowLeft, ShoppingCart, CheckCircle, Trash2, Plus, Users, Utensils, Edit2 } from "lucide-react";
+import { Loader2, ArrowLeft, ShoppingCart, CheckCircle, Trash, X, Plus, Users, Utensils, Edit2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -121,12 +121,16 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
   const closeOrder = useCloseOrder();
   const { data: customers = [] } = useCustomers();
   const createCustomer = useCreateCustomer();
+  const updateSale = useUpdateSale();
 
-  const [paymentType, setPaymentType] = useState<'CASH'|'CARD'|'CREDIT'|'SPLIT'>('CASH');
+  const [paymentType, setPaymentType] = useState<'CASH'|'CARD'|'CREDIT'|'SPLIT'|'FOC'>('CASH');
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [newCustomerName, setNewCustomerName] = useState("");
   const [showSummary, setShowSummary] = useState(false);
   const [cashReceived, setCashReceived] = useState<number>(0);
+  const [focReason, setFocReason] = useState<string>("");
+  const [focNote, setFocNote] = useState<string>("");
+  const [discount, setDiscount] = useState<number>(0);
   
   const activeOrder = useMemo(() => 
     openOrders.find((o: any) => o.tableId === table.id),
@@ -148,7 +152,25 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
   const confirmClose = async () => {
     if (!activeOrder) return;
     try {
-      const total = Number(activeOrder.total) || 0;
+      const subtotal = Number(activeOrder.total) || 0;
+      const effectiveTotal = Math.max(0, subtotal - Number(discount || 0));
+      if (Number(discount || 0) > 0) {
+        const items = (activeOrder.items || []).filter((s: any) => Number(s.total) > 0);
+        let remaining = Math.min(Number(discount || 0), subtotal);
+        for (let i = 0; i < items.length; i++) {
+          const s = items[i];
+          const origTotal = Number(s.total) || 0;
+          if (origTotal <= 0) continue;
+          const restItemsTotal = items.slice(i).reduce((sum: number, it: any) => sum + Number(it.total || 0), 0);
+          const reduce = i === items.length - 1 ? remaining : Math.min(origTotal, Math.round((remaining * origTotal) / restItemsTotal));
+          const newTotal = Math.max(0, origTotal - reduce);
+          const qty = Number(s.quantity) || 1;
+          const newUnit = Math.round(newTotal / qty);
+          await updateSale.mutateAsync({ id: s.id, total: newTotal, unitPrice: newUnit });
+          remaining -= reduce;
+        }
+      }
+      const total = effectiveTotal;
       if (!paymentType) throw new Error("Select payment type");
       if (paymentType === 'CASH') {
         if (cashReceived < total) throw new Error("Cash received is less than total");
@@ -158,12 +180,19 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
       } else if (paymentType === 'CREDIT') {
         if (!selectedCustomerId) throw new Error("Select customer for credit sale");
         await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType, customerId: selectedCustomerId });
+      } else if (paymentType === 'FOC') {
+        if (!focReason) throw new Error("Select FOC reason");
+        if (focReason === 'Other' && !focNote.trim()) throw new Error("Provide note for Other");
+        await Promise.all((activeOrder.items || []).map((s: any) => updateSale.mutateAsync({ id: s.id, isFoc: true, focReason, focNote, theoreticalValue: Number(s.total), total: 0 })));
+        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType: 'FOC' });
       } else {
         const cash = Number(cashReceived || 0);
         if (cash < 0) throw new Error("Cash cannot be negative");
         if (cash > total) throw new Error("Cash cannot exceed total");
         const credit = total - cash;
-        if (credit > 0 && !selectedCustomerId) throw new Error("Select customer for split credit");
+        if (credit > 0 && !selectedCustomerId) {
+          // Let backend fallback to Walk-in Credit if not selected
+        }
         await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType: 'SPLIT', customerId: selectedCustomerId || undefined, cashAmount: cash });
       }
       setShowSummary(false);
@@ -215,6 +244,7 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                   <SelectItem value="CARD">Card</SelectItem>
                   <SelectItem value="CREDIT">Credit</SelectItem>
                   <SelectItem value="SPLIT">Split</SelectItem>
+                  <SelectItem value="FOC">FOC</SelectItem>
                 </SelectContent>
               </Select>
               {(paymentType === 'CREDIT' || (paymentType === 'SPLIT' && (Number(activeOrder.total) - Number(cashReceived) > 0))) && (
@@ -329,9 +359,17 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                     <div>Subtotal</div>
                     <div className="font-mono">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
                   </div>
-                  <div className="flex justify-between text-sm">
+                  <div className="flex items-center justify-between text-sm gap-3">
                     <div>Discount</div>
-                    <div className="font-mono">{`NPR 0`}</div>
+                    <div className="flex items-center gap-2">
+                      <Input type="number" className="w-[140px] text-right" value={discount}
+                        onChange={(e) => {
+                          const val = Number(e.target.value || 0);
+                          const max = Math.max(0, Number(activeOrder.total) || 0);
+                          setDiscount(Math.max(0, Math.min(val, max)));
+                        }} />
+                      <div className="font-mono">{`NPR ${Number(discount || 0).toLocaleString()}`}</div>
+                    </div>
                   </div>
                   <div className="flex justify-between text-sm">
                     <div>Tax</div>
@@ -339,7 +377,7 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                   </div>
                   <div className="flex justify-between text-base font-bold">
                     <div>Total</div>
-                    <div className="font-mono">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
+                    <div className="font-mono">{`NPR ${Math.max(0, Number(activeOrder.total) - Number(discount || 0)).toLocaleString()}`}</div>
                   </div>
                 </div>
                 <div className="text-sm mt-2">Status: CLOSED</div>
@@ -349,25 +387,29 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                   <div className="flex justify-between text-sm">
                     <div>Cash Received</div>
                     <div className="font-mono">{`NPR ${(() => {
-                      const total = Number(activeOrder.total) || 0;
+                      const total = Math.max(0, Number(activeOrder.total) - Number(discount || 0)) || 0;
                       if (paymentType === 'CASH') return Number(total).toLocaleString();
                       if (paymentType === 'SPLIT') return Number(cashReceived || 0).toLocaleString();
+                      if (paymentType === 'FOC') return '0';
                       return Number(0).toLocaleString();
                     })()}`}</div>
                   </div>
                   <div className="flex justify-between text-sm">
                     <div>Balance Due</div>
                     <div className="font-mono text-amber-600">{`NPR ${(() => {
-                      const total = Number(activeOrder.total) || 0;
+                      const total = Math.max(0, Number(activeOrder.total) - Number(discount || 0)) || 0;
                       const credit = paymentType === 'SPLIT' ? Math.max(0, total - Number(cashReceived || 0)) : (paymentType === 'CREDIT' ? total : 0);
                       return Number(credit).toLocaleString();
                     })()}`}</div>
                   </div>
                   {(() => {
-                    const total = Number(activeOrder.total) || 0;
+                    const total = Math.max(0, Number(activeOrder.total) - Number(discount || 0)) || 0;
                     const credit = paymentType === 'SPLIT' ? Math.max(0, total - Number(cashReceived || 0)) : (paymentType === 'CREDIT' ? total : 0);
                     return credit > 0 ? (<div className="text-xs text-amber-600">Outstanding Balance Created</div>) : null;
                   })()}
+                  {paymentType === 'FOC' && (
+                    <div className="text-xs text-emerald-600">Free of Charge Sale</div>
+                  )}
                 </div>
 
                 <div className="pt-2 space-y-3">
@@ -383,6 +425,7 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                           <SelectItem value="CARD">Card</SelectItem>
                           <SelectItem value="CREDIT">Credit</SelectItem>
                           <SelectItem value="SPLIT">Split Payment</SelectItem>
+                          <SelectItem value="FOC">FOC (Free of Charge)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -393,29 +436,55 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                         <div className="text-xs text-muted-foreground mt-1">{`Balance: NPR ${Math.max(0, Number(cashReceived) - Number(activeOrder.total)).toLocaleString()}`}</div>
                       </div>
                     )}
+                    {paymentType === 'FOC' && (
+                      <div className="space-y-2">
+                        <div>
+                          <label className="text-sm">FOC Reason</label>
+                          <Select value={focReason} onValueChange={(v: any) => setFocReason(v)}>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select reason" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Staff meal">Staff meal</SelectItem>
+                              <SelectItem value="Promotion">Promotion</SelectItem>
+                              <SelectItem value="Complaint">Complaint</SelectItem>
+                              <SelectItem value="VIP">VIP</SelectItem>
+                              <SelectItem value="Other">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {focReason === 'Other' && (
+                          <div>
+                            <label className="text-sm">Note</label>
+                            <Input value={focNote} onChange={e => setFocNote(e.target.value)} placeholder="Enter note" />
+                          </div>
+                        )}
+                        <div className="text-xs text-muted-foreground">All items will be set to NPR 0 and recorded as FOC.</div>
+                      </div>
+                    )}
                     {paymentType === 'SPLIT' && (
                       <div className="space-y-2">
                         <div>
                           <div className="text-sm">Total Amount</div>
-                          <div className="font-mono font-bold">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
+                          <div className="font-mono font-bold">{`NPR ${Math.max(0, Number(activeOrder.total) - Number(discount || 0)).toLocaleString()}`}</div>
                         </div>
                         <div>
                           <label className="text-sm">Paid Now (Cash)</label>
                           <Input type="number" value={cashReceived} onChange={(e) => setCashReceived(Number(e.target.value))} min={0} />
-                          <div className="text-xs text-muted-foreground mt-1">{`Remaining Balance: NPR ${Math.max(0, Number(activeOrder.total) - Number(cashReceived)).toLocaleString()}`}</div>
+                          <div className="text-xs text-muted-foreground mt-1">{`Remaining Balance: NPR ${Math.max(0, Math.max(0, Number(activeOrder.total) - Number(discount || 0)) - Number(cashReceived)).toLocaleString()}`}</div>
                         </div>
                         <div>
                           <div className="text-sm">Pay Later (Credit)</div>
-                          <div className="font-mono text-amber-600 font-bold">{`NPR ${Math.max(0, Number(activeOrder.total) - Number(cashReceived)).toLocaleString()}`}</div>
+                          <div className="font-mono text-amber-600 font-bold">{`NPR ${Math.max(0, Math.max(0, Number(activeOrder.total) - Number(discount || 0)) - Number(cashReceived)).toLocaleString()}`}</div>
                         </div>
                       </div>
                     )}
                     {paymentType === 'CREDIT' && (
                       <div>
                         <div className="text-sm">Amount Due</div>
-                        <div className="font-mono font-bold">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
+                        <div className="font-mono font-bold">{`NPR ${Math.max(0, Number(activeOrder.total) - Number(discount || 0)).toLocaleString()}`}</div>
                         <div className="text-sm mt-2">Outstanding Balance</div>
-                        <div className="font-mono">{`NPR ${Number(activeOrder.total).toLocaleString()}`}</div>
+                        <div className="font-mono">{`NPR ${Math.max(0, Number(activeOrder.total) - Number(discount || 0)).toLocaleString()}`}</div>
                       </div>
                     )}
                   </div>
@@ -430,20 +499,24 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                   </div>
                   <div className="text-sm text-muted-foreground mr-4">
                     {paymentType === 'SPLIT' && (
-                      <div>{`Sale will be closed. NPR ${Number(cashReceived || 0).toLocaleString()} received in cash. NPR ${Math.max(0, Number(activeOrder.total) - Number(cashReceived || 0)).toLocaleString()} will be recorded as credit.`}</div>
+                      <div>{`Sale will be closed. NPR ${Number(cashReceived || 0).toLocaleString()} received in cash. NPR ${Math.max(0, Math.max(0, Number(activeOrder.total) - Number(discount || 0)) - Number(cashReceived || 0)).toLocaleString()} will be recorded as credit.`}</div>
+                    )}
+                    {paymentType === 'FOC' && (
+                      <div>{`Sale will be closed as FOC. All items recorded at NPR 0 (${focReason}${focReason === 'Other' && focNote ? ": "+focNote : ''}).`}</div>
                     )}
                   </div>
-              <Button 
-                onClick={confirmClose}
-                disabled={
-                  !paymentType ||
-                  (paymentType === 'CASH' && cashReceived < Number(activeOrder.total)) ||
-                  (paymentType === 'CREDIT' && !selectedCustomerId) ||
-                  (paymentType === 'SPLIT' && (cashReceived < 0 || cashReceived > Number(activeOrder.total)))
-                }
-              >
-                Confirm & Close Sale
-              </Button>
+                  <Button 
+                    onClick={confirmClose}
+                    disabled={
+                      !paymentType ||
+                      (paymentType === 'CASH' && cashReceived < Math.max(0, Number(activeOrder.total) - Number(discount || 0))) ||
+                      (paymentType === 'CREDIT' && !selectedCustomerId) ||
+                      (paymentType === 'SPLIT' && (cashReceived < 0 || cashReceived > Math.max(0, Number(activeOrder.total) - Number(discount || 0)))) ||
+                      (paymentType === 'FOC' && (!focReason || (focReason === 'Other' && !focNote.trim())))
+                    }
+                  >
+                    Confirm & Close Sale
+                  </Button>
                 </div>
 
             <style>{`@media print {
@@ -460,7 +533,11 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
 
 function OrderItemRow({ sale, orderId }: { sale: any, orderId: number }) {
   const removeItem = useRemoveItemFromOrder();
+  const updateSale = useUpdateSale();
   const { toast } = useToast();
+  const [openFOC, setOpenFOC] = useState(false);
+  const [reason, setReason] = useState<string>("");
+  const [note, setNote] = useState<string>("");
 
   const handleRemove = async () => {
     try {
@@ -471,7 +548,12 @@ function OrderItemRow({ sale, orderId }: { sale: any, orderId: number }) {
   };
 
   return (
-    <div className="flex items-start justify-between p-3 rounded-lg border border-border bg-background hover:bg-accent/50 transition-colors">
+    <div className={cn(
+      "flex items-start justify-between p-3 rounded-lg border transition-colors",
+      sale.isFoc
+        ? "bg-orange-50 border-orange-200 dark:bg-orange-900/20"
+        : "bg-background hover:bg-accent/50 border-border"
+    )}>
       <div className="flex-1">
         <div className="font-medium">{sale.item?.name}</div>
         <div className="text-sm text-muted-foreground">
@@ -479,18 +561,86 @@ function OrderItemRow({ sale, orderId }: { sale: any, orderId: number }) {
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <div className="font-bold text-right">
-          NPR {Number(sale.total).toLocaleString()}
+        <div className="text-right">
+          <div className="font-bold">NPR {Number(sale.total).toLocaleString()}</div>
+          {sale.isFoc && <div className="text-xs text-emerald-600">FOC</div>}
         </div>
+        {sale.isFoc ? (
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                await updateSale.mutateAsync({ id: sale.id, isFoc: false });
+                toast({ title: 'FOC removed for item' });
+              } catch (err: any) {
+                toast({ variant: 'destructive', title: 'Error', description: err.message });
+              }
+            }}
+            isLoading={updateSale.isPending}
+          >
+            Unmark FOC
+          </Button>
+        ) : (
+          <Button 
+            variant="outline" 
+            onClick={() => setOpenFOC(true)}
+          >
+            FOC
+          </Button>
+        )}
         <Button 
           variant="outline" 
-          className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+          // className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
           onClick={handleRemove}
           isLoading={removeItem.isPending}
         >
-          <Trash2 className="w-4 h-4" />
+          <X color="red" />
         </Button>
       </div>
+      <Dialog open={openFOC} onOpenChange={setOpenFOC}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark Item as FOC</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm">Reason</label>
+              <Select value={reason} onValueChange={(v: any) => setReason(v)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select reason" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Staff meal">Staff meal</SelectItem>
+                  <SelectItem value="Promotion">Promotion</SelectItem>
+                  <SelectItem value="Complaint">Complaint</SelectItem>
+                  <SelectItem value="VIP">VIP</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {reason === 'Other' && (
+              <div>
+                <label className="text-sm">Note</label>
+                <Input value={note} onChange={e => setNote(e.target.value)} />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpenFOC(false)}>Cancel</Button>
+            <Button onClick={async () => {
+              try {
+                if (!reason) throw new Error('Select reason');
+                if (reason === 'Other' && !note.trim()) throw new Error('Provide note for Other');
+                await updateSale.mutateAsync({ id: sale.id, isFoc: true, focReason: reason, focNote: note, theoreticalValue: Number(sale.total), total: 0 });
+                setOpenFOC(false);
+                toast({ title: 'Item marked FOC' });
+              } catch (err: any) {
+                toast({ variant: 'destructive', title: 'Error', description: err.message });
+              }
+            }}>Mark FOC</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

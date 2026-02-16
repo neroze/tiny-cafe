@@ -400,6 +400,18 @@ export async function registerRoutes(
     }
   });
 
+  app.get(api.reports.foc_summary.path, async (req, res) => {
+    try {
+      const from = req.query.from ? new Date(`${req.query.from as string}T00:00:00`) : undefined;
+      const to = req.query.to ? new Date(`${req.query.to as string}T00:00:00`) : undefined;
+      if (!from || !to) return res.status(400).json({ message: "from and to are required" });
+      const data = await storage.getFocSummary(from, to);
+      res.json(data);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
   // Customers
   app.get(api.customers.list.path, async (_req, res) => {
     const customers = await storage.getCustomers();
