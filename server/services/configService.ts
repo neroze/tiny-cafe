@@ -33,7 +33,14 @@ export async function removeLabel(label: string) {
 
 export async function getConfiguredCategories() {
   const catsStr = await storage.getSetting("configured_categories");
-  return catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"];
+  const configured = catsStr ? JSON.parse(catsStr) : ["Snacks", "Drinks", "Main"];
+  
+  // Also get all unique categories currently in use in the items table
+  const allItems = await storage.getItems();
+  const inUse = Array.from(new Set(allItems.map(item => item.category)));
+  
+  // Merge and sort
+  return Array.from(new Set([...configured, ...inUse])).sort();
 }
 
 export async function addCategory(category: string) {

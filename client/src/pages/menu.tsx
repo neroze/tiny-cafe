@@ -5,23 +5,49 @@ import { useItems, useCreateItem, useUpdateItem, useDeleteItem } from "@/hooks/u
 import { useRecipe, useUpsertRecipe } from "@/hooks/use-recipes";
 import { useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Edit2, Trash2, X, Search } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useQuery } from "@tanstack/react-query";
+import { Plus, Edit2, Trash2, X, Search, Settings as SettingsIcon } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { Badge } from "@/components/ui/badge";
 import type { InsertItem } from "@shared/schema";
 
 export default function MenuItems() {
   const { data: items = [], isLoading } = useItems();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isCategoriesDialogOpen, setIsCategoriesDialogOpen] = useState(false);
+  const [newConfigCategory, setNewConfigCategory] = useState("");
   const [editingItem, setEditingItem] = useState<InsertItem & { id?: number } | null>(null);
 
-  const filteredItems = items
-    .filter(item => !item.isIngredient) // Strictly filter out inventory items from Menu
-    .filter(item => 
-      item.name.toLowerCase().includes(search.toLowerCase()) || 
-      item.category.toLowerCase().includes(search.toLowerCase())
-    );
+  const { data: configCategories = [] } = useQuery<string[]>({
+    queryKey: ["/api/config/categories"],
+  });
+
+  const addCategoryMutation = useMutation({
+    mutationFn: async (category: string) => {
+      await apiRequest("POST", "/api/config/categories", { category });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/config/categories"] });
+      setNewConfigCategory("");
+    }
+  });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: async (category: string) => {
+      await apiRequest("DELETE", "/api/config/categories", { category });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/config/categories"] });
+    }
+  });
+
+  const filteredItems = items.filter(item => 
+    item.name.toLowerCase().includes(search.toLowerCase()) || 
+    item.category.toLowerCase().includes(search.toLowerCase())
+  );
 
   const openCreate = () => {
     setEditingItem(null);
@@ -39,9 +65,14 @@ export default function MenuItems() {
         title="Menu Management" 
         description="Manage your items, prices, and categories."
         action={
-          <Button onClick={openCreate}>
-            <Plus className="w-4 h-4 mr-2" /> Add Item
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setIsCategoriesDialogOpen(true)}>
+              <SettingsIcon className="w-4 h-4 mr-2" /> Categories
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus className="w-4 h-4 mr-2" /> Add Item
+            </Button>
+          </div>
         }
       />
 
@@ -71,6 +102,50 @@ export default function MenuItems() {
         onOpenChange={setIsDialogOpen} 
         initialData={editingItem} 
       />
+
+      <Dialog open={isCategoriesDialogOpen} onOpenChange={setIsCategoriesDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Configure Menu Categories</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex gap-2">
+              <Input 
+                placeholder="New category name..." 
+                value={newConfigCategory}
+                onChange={(e) => setNewConfigCategory(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newConfigCategory.trim()) {
+                    addCategoryMutation.mutate(newConfigCategory.trim());
+                  }
+                }}
+              />
+              <Button 
+                onClick={() => newConfigCategory.trim() && addCategoryMutation.mutate(newConfigCategory.trim())}
+                disabled={addCategoryMutation.isPending}
+              >
+                Add
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto p-1">
+              {configCategories.map((cat: string) => (
+                <Badge key={cat} variant="secondary" className="gap-1 px-2 py-1">
+                  {cat}
+                  <button 
+                    className="hover:text-destructive"
+                    onClick={() => deleteCategoryMutation.mutate(cat)}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </Badge>
+              ))}
+              {configCategories.length === 0 && (
+                <p className="text-sm text-muted-foreground w-full text-center py-4">No configured categories yet.</p>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
@@ -141,6 +216,8 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
     queryKey: ["/api/config/categories"],
   });
 
+  const [isCatConfigOpen, setIsCatConfigOpen] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData(e.target as HTMLFormElement);
@@ -169,6 +246,27 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
 
   const categories: string[] = (configCategories as string[]).length > 0 ? (configCategories as string[]) : ["Drinks", "Snacks", "Main", "Dessert"];
 
+  const queryClient = useQueryClient();
+  const [newConfigCategory, setNewConfigCategory] = useState("");
+  const addCategoryMutation = useMutation({
+    mutationFn: async (category: string) => {
+      await apiRequest("POST", "/api/config/categories", { category });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/config/categories"] });
+      setNewConfigCategory("");
+    }
+  });
+
+  const deleteCategoryMutation = useMutation({
+    mutationFn: async (category: string) => {
+      await apiRequest("DELETE", "/api/config/categories", { category });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/config/categories"] });
+    }
+  });
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="bg-background sm:max-w-[425px]">
@@ -184,7 +282,52 @@ function ItemDialog({ open, onOpenChange, initialData }: { open: boolean, onOpen
           </div>
           
           <div>
-            <label className="block text-sm font-medium mb-1">Category</label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-sm font-medium">Category</label>
+              <button 
+                type="button"
+                onClick={() => setIsCatConfigOpen(!isCatConfigOpen)}
+                className="text-xs text-primary hover:underline flex items-center gap-1"
+              >
+                <SettingsIcon className="w-3 h-3" /> Manage
+              </button>
+            </div>
+
+            {isCatConfigOpen && (
+              <div className="mb-3 p-3 bg-secondary/30 rounded-xl border border-border space-y-3">
+                <div className="flex gap-2">
+                  <Input 
+                    placeholder="New..." 
+                    value={newConfigCategory}
+                    className="h-9 text-sm"
+                    onChange={(e) => setNewConfigCategory(e.target.value)}
+                  />
+                  <Button 
+                    type="button"
+                    className="px-3 py-1 h-9 text-sm"
+                    onClick={() => newConfigCategory.trim() && addCategoryMutation.mutate(newConfigCategory.trim())}
+                    disabled={addCategoryMutation.isPending}
+                  >
+                    Add
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto">
+                  {configCategories.map((cat: string) => (
+                    <Badge key={cat} variant="secondary" className="text-[10px] gap-1 px-1.5 py-0">
+                      {cat}
+                      <button 
+                        type="button"
+                        className="hover:text-destructive"
+                        onClick={() => deleteCategoryMutation.mutate(cat)}
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <Select name="category" defaultValue={initialData?.category || categories[0]}>
               {categories.map((cat: string) => (
                 <option key={cat} value={cat}>{cat}</option>

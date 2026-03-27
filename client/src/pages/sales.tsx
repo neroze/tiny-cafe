@@ -7,12 +7,14 @@ import { useOrders, useCreateOrder, useAddItemToOrder, useRemoveItemFromOrder, u
 import { useCustomers, useCreateCustomer } from "@/hooks/use-customers";
 import { useItems } from "@/hooks/use-items";
 import { useReceivables, useRecordReceivablePayment } from "@/hooks/use-receivables";
+import { useSales, useUpdateSale, useCreateSale } from "@/hooks/use-sales";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, ArrowLeft, ShoppingCart, CheckCircle, Trash, X, Plus, Users, Utensils, Edit2 } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Search, Loader2, ArrowLeft, ShoppingCart, CheckCircle, Trash, X, Plus, Users, Utensils, Edit2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -36,10 +38,11 @@ export default function SalesPage() {
       ) : (
         <div className="space-y-6">
           <Tabs defaultValue="orders">
-            <TabsList className="grid grid-cols-3 w-full max-w-md">
+            <TabsList className="grid grid-cols-4 w-full max-w-lg">
               <TabsTrigger value="orders">Table Service</TabsTrigger>
-              <TabsTrigger value="history">Sales History</TabsTrigger>
-              <TabsTrigger value="credit">Credit Settlement</TabsTrigger>
+              <TabsTrigger value="quick">Quick Sale</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+              <TabsTrigger value="credit">Credit</TabsTrigger>
             </TabsList>
             <TabsContent value="orders" className="mt-6">
               <PageHeader 
@@ -66,6 +69,9 @@ export default function SalesPage() {
                   )}
                 </div>
               )}
+            </TabsContent>
+            <TabsContent value="quick" className="mt-6">
+              <QuickSale />
             </TabsContent>
             <TabsContent value="history" className="mt-6">
               <SalesHistory />
@@ -123,93 +129,64 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
   const createCustomer = useCreateCustomer();
   const updateSale = useUpdateSale();
 
-  const [paymentType, setPaymentType] = useState<'CASH'|'CARD'|'CREDIT'|'SPLIT'|'FOC'>('CASH');
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
-  const [newCustomerName, setNewCustomerName] = useState("");
-  const [showSummary, setShowSummary] = useState(false);
-  const [cashReceived, setCashReceived] = useState<number>(0);
-  const [focReason, setFocReason] = useState<string>("");
-  const [focNote, setFocNote] = useState<string>("");
-  const [discount, setDiscount] = useState<number>(0);
-  
+  // Derived
   const activeOrder = useMemo(() => 
     openOrders.find((o: any) => o.tableId === table.id),
     [openOrders, table.id]
   );
 
+  const [paymentType, setPaymentType] = useState<string>("CASH");
+  const [cashReceived, setCashReceived] = useState<number>(0);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
+  const [newCustomerName, setNewCustomerName] = useState<string>("");
+  const [showSummary, setShowSummary] = useState(false);
+  const [focReason, setFocReason] = useState<string>("");
+  const [focNote, setFocNote] = useState<string>("");
+  const [discount, setDiscount] = useState<number>(0);
+
+  const orderItems = activeOrder?.items || [];
+  const orderTotal = activeOrder?.total || 0;
+  const orderId = activeOrder?.id;
+
   const handleStartOrder = async () => {
     try {
       await createOrder.mutateAsync({
         tableId: table.id,
-        status: "OPEN"
+        status: 'OPEN',
+        total: 0,
+        paymentType: 'CASH',
+        paymentStatus: 'PAID',
+        cashAmount: 0,
+        creditAmount: 0
       });
-      toast({ title: "Order Started", description: `Order started for Table ${table.number}` });
+      toast({ title: "Order Started", description: `Table ${table.number} is now occupied.` });
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error", description: err.message });
     }
   };
 
   const confirmClose = async () => {
-    if (!activeOrder) return;
+    if (!orderId) return;
     try {
-      const subtotal = Number(activeOrder.total) || 0;
-      const effectiveTotal = Math.max(0, subtotal - Number(discount || 0));
-      if (Number(discount || 0) > 0) {
-        const items = (activeOrder.items || []).filter((s: any) => Number(s.total) > 0);
-        let remaining = Math.min(Number(discount || 0), subtotal);
-        for (let i = 0; i < items.length; i++) {
-          const s = items[i];
-          const origTotal = Number(s.total) || 0;
-          if (origTotal <= 0) continue;
-          const restItemsTotal = items.slice(i).reduce((sum: number, it: any) => sum + Number(it.total || 0), 0);
-          const reduce = i === items.length - 1 ? remaining : Math.min(origTotal, Math.round((remaining * origTotal) / restItemsTotal));
-          const newTotal = Math.max(0, origTotal - reduce);
-          const qty = Number(s.quantity) || 1;
-          const newUnit = Math.round(newTotal / qty);
-          await updateSale.mutateAsync({ id: s.id, total: newTotal, unitPrice: newUnit });
-          remaining -= reduce;
-        }
+      let customerId = selectedCustomerId;
+      if (paymentType === 'CREDIT' && !customerId && newCustomerName.trim()) {
+        const cust = await createCustomer.mutateAsync({ name: newCustomerName.trim() });
+        customerId = cust.id;
       }
-      const total = effectiveTotal;
-      if (!paymentType) throw new Error("Select payment type");
-      if (paymentType === 'CASH') {
-        if (cashReceived < total) throw new Error("Cash received is less than total");
-        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType });
-      } else if (paymentType === 'CARD') {
-        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType });
-      } else if (paymentType === 'CREDIT') {
-        if (!selectedCustomerId) throw new Error("Select customer for credit sale");
-        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType, customerId: selectedCustomerId });
-      } else if (paymentType === 'FOC') {
-        if (!focReason) throw new Error("Select FOC reason");
-        if (focReason === 'Other' && !focNote.trim()) throw new Error("Provide note for Other");
-        await Promise.all((activeOrder.items || []).map((s: any) => updateSale.mutateAsync({ id: s.id, isFoc: true, focReason, focNote, theoreticalValue: Number(s.total), total: 0 })));
-        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType: 'FOC' });
-      } else {
-        const cash = Number(cashReceived || 0);
-        if (cash < 0) throw new Error("Cash cannot be negative");
-        if (cash > total) throw new Error("Cash cannot exceed total");
-        const credit = total - cash;
-        if (credit > 0 && !selectedCustomerId) {
-          // Let backend fallback to Walk-in Credit if not selected
-        }
-        await closeOrder.mutateAsync({ orderId: activeOrder.id, paymentType: 'SPLIT', customerId: selectedCustomerId || undefined, cashAmount: cash });
-      }
-      setShowSummary(false);
-      toast({ title: "Order Closed", description: `Order for Table ${table.number} has been finalized.` });
+
+      await closeOrder.mutateAsync({
+        orderId: orderId,
+        paymentType: paymentType as any,
+        customerId: customerId || undefined,
+        cashAmount: paymentType === 'SPLIT' ? cashReceived : undefined
+      });
+
+      toast({ title: "Order Closed", description: `Table ${table.number} is now free.` });
       onBack();
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error", description: err.message });
     }
   };
-
-  if (isLoadingOrders) {
-    return (
-      <div className="h-[50vh] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
-  }
 
   return (
     <div className="h-[calc(100vh-100px)] flex flex-col">
@@ -649,18 +626,24 @@ function MenuSelection({ orderId }: { orderId: number }) {
   const { data: items = [] } = useItems();
   const addItem = useAddItemToOrder();
   const { toast } = useToast();
+  const { data: categories = [] } = useQuery<string[]>({ queryKey: ["/api/config/categories"] });
   
   // Filter out ingredients
   const menuItems = useMemo(() => items.filter(i => !i.isIngredient), [items]);
   
-  // Group by category (if available, otherwise "All")
-  // For now, let's just use a search/filter approach
   const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("All");
   
   const filteredItems = useMemo(() => {
-    if (!search) return menuItems;
-    return menuItems.filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
-  }, [menuItems, search]);
+    let result = menuItems;
+    if (selectedCategory !== "All") {
+      result = result.filter(i => i.category === selectedCategory);
+    }
+    if (search) {
+      result = result.filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
+    }
+    return result;
+  }, [menuItems, search, selectedCategory]);
 
   const handleAddItem = async (item: any) => {
     try {
@@ -673,7 +656,6 @@ function MenuSelection({ orderId }: { orderId: number }) {
           total: Number(item.sellingPrice)
         }
       });
-      // Optional: Toast or sound
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error", description: err.message });
     }
@@ -681,14 +663,34 @@ function MenuSelection({ orderId }: { orderId: number }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-border gap-4 flex">
-        <div className="relative flex-1">
+      <div className="p-4 border-b border-border space-y-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input 
             placeholder="Search menu items..." 
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full"
+            className="w-full pl-9"
           />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button 
+            variant={selectedCategory === "All" ? "primary" : "outline"}
+            onClick={() => setSelectedCategory("All")}
+            className="h-8 text-xs px-3"
+          >
+            All
+          </Button>
+          {categories.map((cat: string) => (
+            <Button
+              key={cat}
+              variant={selectedCategory === cat ? "primary" : "outline"}
+              onClick={() => setSelectedCategory(cat)}
+              className="h-8 text-xs px-3"
+            >
+              {cat}
+            </Button>
+          ))}
         </div>
       </div>
       
@@ -709,6 +711,11 @@ function MenuSelection({ orderId }: { orderId: number }) {
               </div>
             </button>
           ))}
+          {filteredItems.length === 0 && (
+            <div className="col-span-full py-12 text-center text-muted-foreground italic">
+              No items found in this category.
+            </div>
+          )}
         </div>
       </ScrollArea>
     </div>
@@ -1167,4 +1174,140 @@ function ReceivableRow({ receivable, onPaid, isSubmitting, onSubmit }: { receiva
     </div>
   );
 }
-import { useSales, useUpdateSale } from "@/hooks/use-sales";
+function QuickSale() {
+  const { toast } = useToast();
+  const { data: items = [] } = useItems();
+  const [itemId, setItemId] = useState("");
+  const [quantity, setQuantity] = useState("1");
+  const [customPrice, setCustomPrice] = useState("");
+  const [discount, setDiscount] = useState("0");
+  const [labels, setLabels] = useState<string[]>([]);
+  const [date, setDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  
+  const createSale = useCreateSale();
+
+  const selectedItem = useMemo(() => 
+    items.find(i => i.id === Number(itemId)), 
+    [items, itemId]
+  );
+  
+  const unitPrice = customPrice 
+    ? Number(customPrice) 
+    : (selectedItem ? Number(selectedItem.sellingPrice) : 0);
+
+  const total = Math.max(0, (unitPrice * Number(quantity)) - Number(discount || 0));
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedItem) return;
+
+    try {
+      await createSale.mutateAsync({
+        date: new Date(date).toISOString(),
+        itemId: selectedItem.id,
+        quantity: Number(quantity),
+        unitPrice: Number(unitPrice),
+        total: Number(total),
+        labels: labels
+      });
+      
+      toast({
+        title: "Sale Recorded",
+        description: `Sold ${quantity}x ${selectedItem.name}`,
+      });
+      
+      setQuantity("1");
+      setItemId("");
+      setCustomPrice("");
+      setDiscount("0");
+      setLabels([]);
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error", description: error.message });
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <Card className="lg:col-span-1 p-6">
+        <h3 className="text-lg font-bold mb-4">New Direct Sale</h3>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Date</label>
+            <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Item</label>
+            <Select value={itemId} onValueChange={setItemId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select item" />
+              </SelectTrigger>
+              <SelectContent>
+                {items.filter(i => !i.isIngredient).map(item => (
+                  <SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Quantity</label>
+              <Input type="number" value={quantity} onChange={e => setQuantity(e.target.value)} min="1" />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Discount</label>
+              <Input type="number" value={discount} onChange={e => setDiscount(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Custom Price (Optional)</label>
+            <Input type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} placeholder={selectedItem ? String(selectedItem.sellingPrice) : ""} />
+          </div>
+          <div className="pt-4 border-t border-border">
+            <div className="flex justify-between text-lg font-bold mb-4">
+              <span>Total</span>
+              <span>NPR {total.toLocaleString()}</span>
+            </div>
+            <Button type="submit" className="w-full" isLoading={createSale.isPending} disabled={!selectedItem}>
+              Record Sale
+            </Button>
+          </div>
+        </form>
+      </Card>
+      <div className="lg:col-span-2">
+        <QuickSalesList limit={10} />
+      </div>
+    </div>
+  );
+}
+
+function QuickSalesList({ limit }: { limit?: number }) {
+  const { data: sales = [], isLoading } = useSales({ limit: String(limit) });
+  if (isLoading) return <Loader2 className="w-8 h-8 animate-spin" />;
+  return (
+    <Card className="p-0 overflow-hidden">
+      <div className="p-4 border-b border-border bg-muted/30 font-medium">Recent Sales</div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-secondary/30">
+            <tr>
+              <th className="p-3 text-left">Date</th>
+              <th className="p-3 text-left">Item</th>
+              <th className="p-3 text-right">Qty</th>
+              <th className="p-3 text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sales.map((s: any) => (
+              <tr key={s.id} className="border-t border-border">
+                <td className="p-3">{format(new Date(s.date), 'MMM d, h:mm a')}</td>
+                <td className="p-3 font-medium">{s.item?.name}</td>
+                <td className="p-3 text-right">{s.quantity}</td>
+                <td className="p-3 text-right font-bold">NPR {Number(s.total).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}

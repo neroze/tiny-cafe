@@ -127,12 +127,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createItem(insertItem: InsertItem): Promise<Item> {
-    const [item] = await db.insert(items).values(insertItem).returning();
+    const payload: any = {
+      ...insertItem,
+    };
+    if (insertItem.costPrice !== undefined) {
+      payload.costPrice = insertItem.costPrice.toFixed(2);
+    }
+    if (insertItem.sellingPrice !== undefined) {
+      payload.sellingPrice = insertItem.sellingPrice.toFixed(2);
+    }
+    const [item] = await db.insert(items).values(payload).returning();
     return item;
   }
 
   async updateItem(id: number, updates: Partial<InsertItem>): Promise<Item> {
-    const [item] = await db.update(items).set(updates).where(eq(items.id, id)).returning();
+    const payload: any = {
+      ...updates,
+    };
+    if (updates.costPrice !== undefined) {
+      payload.costPrice = updates.costPrice.toFixed(2);
+    }
+    if (updates.sellingPrice !== undefined) {
+      payload.sellingPrice = updates.sellingPrice.toFixed(2);
+    }
+    const [item] = await db.update(items).set(payload).where(eq(items.id, id)).returning();
     return item;
   }
 
@@ -231,7 +249,13 @@ export class DatabaseStorage implements IStorage {
       saleCogs += Number(comp.quantity) * perUnitCost;
     }
     saleCogs = saleCogs * Number(insertSale.quantity);
-    const [sale] = await db.insert(sales).values({ ...insertSale, cogs: String(saleCogs) }).returning();
+    const [sale] = await db.insert(sales).values({ 
+      ...insertSale, 
+      unitPrice: Number(insertSale.unitPrice).toFixed(2),
+      total: Number(insertSale.total).toFixed(2),
+      theoreticalValue: Number(insertSale.theoreticalValue || 0).toFixed(2),
+      cogs: Number(saleCogs).toFixed(2) 
+    }).returning();
     // Deduct ingredient stock usage
     for (const comp of recipe.ingredients) {
       const useQty = Math.round(Number(comp.quantity) * Number(insertSale.quantity));
@@ -247,13 +271,17 @@ export class DatabaseStorage implements IStorage {
     const [existing] = await db.select().from(sales).where(eq(sales.id, id)).limit(1);
     if (!existing) throw new Error("Sale not found");
     const patch: any = { ...updates };
+
+    if (patch.total !== undefined) patch.total = Number(patch.total).toFixed(2);
+    if (patch.unitPrice !== undefined) patch.unitPrice = Number(patch.unitPrice).toFixed(2);
+    if (patch.theoreticalValue !== undefined) patch.theoreticalValue = Number(patch.theoreticalValue).toFixed(2);
+
     if ((updates as any).isFoc === true && existing.isFoc !== true) {
       const currentTotal = Number(existing.total) || 0;
-      if ((updates as any).theoreticalValue === undefined) patch.theoreticalValue = currentTotal;
-      if (updates.total === undefined) patch.total = 0;
+      if ((updates as any).theoreticalValue === undefined) patch.theoreticalValue = currentTotal.toFixed(2);
+      if (updates.total === undefined) patch.total = "0.00";
       if (updates.unitPrice === undefined) {
-        const qty = Number(existing.quantity) || 1;
-        patch.unitPrice = 0;
+        patch.unitPrice = "0.00";
       }
       patch.isFoc = true;
     }
@@ -262,15 +290,15 @@ export class DatabaseStorage implements IStorage {
       const restoreTotal = (updates as any).theoreticalValue !== undefined
         ? Number((updates as any).theoreticalValue)
         : Number(existing.theoreticalValue || 0);
-      if (updates.total === undefined) patch.total = restoreTotal;
-      if (updates.unitPrice === undefined) patch.unitPrice = Math.round(restoreTotal / qty);
+      if (updates.total === undefined) patch.total = restoreTotal.toFixed(2);
+      if (updates.unitPrice === undefined) patch.unitPrice = (restoreTotal / qty).toFixed(2);
       patch.isFoc = false;
     }
     const [updated] = await db.update(sales).set(patch).where(eq(sales.id, id)).returning();
     if (existing.orderId) {
       const sumRows = await db.select({ total: sum(sales.total) }).from(sales).where(eq(sales.orderId, existing.orderId));
       const newOrderTotal = Number(sumRows[0]?.total) || 0;
-      await db.update(orders).set({ total: newOrderTotal }).where(eq(orders.id, existing.orderId));
+      await db.update(orders).set({ total: newOrderTotal.toFixed(2) }).where(eq(orders.id, existing.orderId));
     }
     
     // TODO: Handle inventory adjustment for sale updates correctly. 
@@ -625,10 +653,12 @@ export class DatabaseStorage implements IStorage {
     .orderBy(desc(sum(sales.total)))
     .limit(1);
 
-    const totalRevenue = salesData.reduce((sum, s) => sum + s.total, 0);
-    const totalItemsSold = salesData.reduce((sum, s) => sum + s.quantity, 0);
+    const totalRevenue = salesData.reduce((sum, s) => sum + Number(s.total), 0);
+    const totalItemsSold = salesData.reduce((sum, s) => sum + Number(s.quantity), 0);
     const averageOrderValue = salesData.length > 0 ? totalRevenue / salesData.length : 0;
     const wastageTotal = Number(stockData[0]?.wastage) || 0;
+
+    const topCategoryTotal = Number(topCategoryRes[0]?.total || 0);
 
     return {
       summary: {
@@ -675,17 +705,18 @@ export class DatabaseStorage implements IStorage {
 
   private dailyAllocationFor(exp: Expense, date: Date) {
     const d = new Date(date);
-    if (!exp.isRecurring) return exp.amount;
-    if (exp.frequency === 'daily') return exp.amount;
+    const amount = Number(exp.amount);
+    if (!exp.isRecurring) return amount;
+    if (exp.frequency === 'daily') return amount;
     if (exp.frequency === 'monthly') {
       const daysInMonth = endOfMonth(d).getDate();
-      return Math.round(exp.amount / daysInMonth);
+      return Math.round(amount / daysInMonth);
     }
     // yearly
     const startY = startOfMonth(new Date(d.getFullYear(), 0, 1));
     const endY = endOfMonth(new Date(d.getFullYear(), 11, 1));
     const daysInYear = this.daysBetweenInclusive(startY, endY);
-    return Math.round(exp.amount / daysInYear);
+    return Math.round(amount / daysInYear);
   }
 
   async getExpenses(from?: Date, to?: Date): Promise<{
@@ -711,8 +742,9 @@ export class DatabaseStorage implements IStorage {
     const byCategory: Record<string, number> = {};
 
     for (const exp of oneTimeRows) {
-      total += exp.amount;
-      byCategory[exp.category] = (byCategory[exp.category] || 0) + exp.amount;
+      const amount = Number(exp.amount);
+      total += amount;
+      byCategory[exp.category] = (byCategory[exp.category] || 0) + amount;
       items.push(exp);
     }
 
@@ -733,12 +765,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createExpense(expense: InsertExpense): Promise<Expense> {
-    const [row] = await db.insert(expenses).values(expense).returning();
-    return row;
+    const [result] = await db.insert(expenses).values({
+      ...expense,
+      amount: Number(expense.amount).toFixed(2)
+    }).returning();
+    return result;
   }
 
   async updateExpense(id: number, updates: Partial<InsertExpense>): Promise<Expense> {
-    const [row] = await db.update(expenses).set(updates).where(eq(expenses.id, id)).returning();
+    const patch: any = { ...updates };
+    if (patch.amount !== undefined) patch.amount = Number(patch.amount).toFixed(2);
+    const [row] = await db.update(expenses).set(patch).where(eq(expenses.id, id)).returning();
     return row;
   }
 
@@ -804,7 +841,7 @@ export class DatabaseStorage implements IStorage {
       const dCOGS = dSales.reduce((s, r) => s + Number(r.cogs || 0), 0);
       const dExpenses = expensesAgg.items.reduce((s, e) => {
         if (e.isRecurring) return s + (e.allocatedDaily || 0);
-        return s + (e.date >= dStart && e.date <= dEnd ? e.amount : 0);
+        return s + (e.date >= dStart && e.date <= dEnd ? Number(e.amount) : 0);
       }, 0);
       trend.push({ date: dStart.toISOString(), net: dSalesTotal - dCOGS - dExpenses });
     }
@@ -821,7 +858,7 @@ export class DatabaseStorage implements IStorage {
       const dStart = startOfDay(end);
       const dEnd = endOfDay(end);
       if (e.isRecurring) return s + (e.allocatedDaily || 0);
-      return s + (e.date >= dStart && e.date <= dEnd ? e.amount : 0);
+      return s + (e.date >= dStart && e.date <= dEnd ? Number(e.amount) : 0);
     }, 0) : 0;
     const avgExpense = totalExpenses / days;
     const expenseSpike = lastDayExpense > avgExpense * 1.5;
@@ -874,7 +911,7 @@ export class DatabaseStorage implements IStorage {
       }
     }
     await db.update(items)
-      .set({ costPrice: Math.round(totalCost) })
+      .set({ costPrice: totalCost.toFixed(2) })
       .where(eq(items.id, menuItemId));
 
     return { message: "Recipe saved" };
@@ -988,13 +1025,22 @@ export class DatabaseStorage implements IStorage {
       throw new Error(`Table ${order.tableId} already has an open order`);
     }
 
-    const [created] = await db.insert(orders).values(order).returning();
+    const [created] = await db.insert(orders).values({
+      ...order,
+      total: Number(order.total || 0).toFixed(2),
+      cashAmount: Number(order.cashAmount || 0).toFixed(2),
+      creditAmount: Number(order.creditAmount || 0).toFixed(2),
+    }).returning();
     await db.update(tables).set({ status: 'occupied' }).where(eq(tables.id, order.tableId));
     return created;
   }
 
   async updateOrder(id: number, updates: Partial<InsertOrder>): Promise<Order> {
-    const [updated] = await db.update(orders).set(updates).where(eq(orders.id, id)).returning();
+    const patch: any = { ...updates };
+    if (patch.total !== undefined) patch.total = Number(patch.total).toFixed(2);
+    if (patch.cashAmount !== undefined) patch.cashAmount = Number(patch.cashAmount).toFixed(2);
+    if (patch.creditAmount !== undefined) patch.creditAmount = Number(patch.creditAmount).toFixed(2);
+    const [updated] = await db.update(orders).set(patch).where(eq(orders.id, id)).returning();
     return updated;
   }
 
@@ -1004,10 +1050,17 @@ export class DatabaseStorage implements IStorage {
          throw new Error("Order is not open");
      }
 
-     const [sale] = await db.insert(sales).values({ ...item, orderId, cogs: "0" }).returning();
+     const [sale] = await db.insert(sales).values({ 
+       ...item, 
+       orderId, 
+       cogs: "0.00",
+       unitPrice: Number(item.unitPrice).toFixed(2),
+       total: Number(item.total).toFixed(2),
+       theoreticalValue: Number(item.theoreticalValue || 0).toFixed(2)
+     } as any).returning();
      
-     const currentTotal = order.total || 0;
-     await db.update(orders).set({ total: currentTotal + sale.total }).where(eq(orders.id, orderId));
+     const currentTotal = Number(order.total || 0);
+     await db.update(orders).set({ total: (currentTotal + Number(sale.total)).toFixed(2) }).where(eq(orders.id, orderId));
      
      return sale;
   }
@@ -1020,7 +1073,7 @@ export class DatabaseStorage implements IStorage {
         const [order] = await db.select().from(orders).where(eq(orders.id, sale.orderId));
         if (order && order.status === 'OPEN') {
              await db.delete(sales).where(eq(sales.id, saleId));
-             await db.update(orders).set({ total: (order.total || 0) - sale.total }).where(eq(orders.id, order.id));
+             await db.update(orders).set({ total: (Number(order.total || 0) - Number(sale.total)).toFixed(2) }).where(eq(orders.id, order.id));
         } else {
             throw new Error("Cannot remove item from closed order");
         }
@@ -1086,16 +1139,16 @@ export class DatabaseStorage implements IStorage {
         if (!curr.isFoc) {
           const restorePatch: any = {
             isFoc: true,
-            theoreticalValue: Number(curr.total || 0),
-            unitPrice: 0,
-            total: 0,
+            theoreticalValue: Number(curr.total || 0).toFixed(2),
+            unitPrice: "0.00",
+            total: "0.00",
           };
           await db.update(sales).set(restorePatch).where(eq(sales.id, curr.id));
         }
       }
       const sumRows = await db.select({ total: sum(sales.total) }).from(sales).where(eq(sales.orderId, id));
       const newOrderTotal = Number(sumRows[0]?.total) || 0;
-      await db.update(orders).set({ total: newOrderTotal }).where(eq(orders.id, id));
+      await db.update(orders).set({ total: newOrderTotal.toFixed(2) }).where(eq(orders.id, id));
     }
 
     if (newPaymentType === 'CASH') {
@@ -1134,7 +1187,14 @@ export class DatabaseStorage implements IStorage {
     }
 
     const [closedOrder] = await db.update(orders)
-        .set({ status: 'CLOSED', closedAt: now, paymentType: newPaymentType, paymentStatus, cashAmount: newCashAmount, creditAmount: newCreditAmount })
+        .set({ 
+          status: 'CLOSED', 
+          closedAt: now, 
+          paymentType: newPaymentType, 
+          paymentStatus, 
+          cashAmount: newCashAmount.toFixed(2), 
+          creditAmount: newCreditAmount.toFixed(2) 
+        })
         .where(eq(orders.id, id))
         .returning();
         
@@ -1142,14 +1202,14 @@ export class DatabaseStorage implements IStorage {
         await db.update(tables).set({ status: 'empty' }).where(eq(tables.id, closedOrder.tableId));
     }
     
-    if (newPaymentType === 'CREDIT' || (newPaymentType === 'SPLIT' && (closedOrder.creditAmount || 0) > 0)) {
+    if (newPaymentType === 'CREDIT' || (newPaymentType === 'SPLIT' && Number(closedOrder.creditAmount || 0) > 0)) {
       await db.insert(receivables).values({
         orderId: closedOrder.id,
         customerId: customerId!,
-        amount: closedOrder.creditAmount || 0,
-        outstanding: closedOrder.creditAmount || 0,
+        amount: Number(closedOrder.creditAmount || 0).toFixed(2),
+        outstanding: Number(closedOrder.creditAmount || 0).toFixed(2),
         status: 'OPEN',
-      });
+      } as any);
     }
 
     if (newCashAmount > 0) {
@@ -1192,7 +1252,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createReceivable(orderId: number, customerId: number, amount: number): Promise<Receivable> {
-    const [created] = await db.insert(receivables).values({ orderId, customerId, amount, outstanding: amount, status: 'OPEN' }).returning();
+    const [created] = await db.insert(receivables).values({ 
+      orderId, 
+      customerId, 
+      amount: amount.toFixed(2), 
+      outstanding: amount.toFixed(2), 
+      status: 'OPEN' 
+    } as any).returning();
     return created;
   }
 
@@ -1302,12 +1368,12 @@ export class DatabaseStorage implements IStorage {
     if (!rec) throw new Error('Receivable not found');
     if (amount <= 0) throw new Error('Amount must be positive');
 
-    await db.insert(payments).values({ receivableId, amount, method });
-    const newOutstanding = Math.max(0, (rec.outstanding || 0) - amount);
+    await db.insert(payments).values({ receivableId, amount: amount.toFixed(2), method });
+    const newOutstanding = Math.max(0, Number(rec.outstanding || 0) - amount);
     const newStatus = newOutstanding === 0 ? 'SETTLED' : 'OPEN';
 
     const [updated] = await db.update(receivables)
-      .set({ outstanding: newOutstanding, status: newStatus, updatedAt: new Date() })
+      .set({ outstanding: newOutstanding.toFixed(2), status: newStatus, updatedAt: new Date() })
       .where(eq(receivables.id, receivableId))
       .returning();
 

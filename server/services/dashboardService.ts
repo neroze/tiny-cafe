@@ -24,7 +24,7 @@ export async function getExportCSV(from: Date, to: Date) {
   data.sales.forEach((s) => {
     if (!itemStats[s.item.name]) itemStats[s.item.name] = { qty: 0, total: 0 };
     itemStats[s.item.name].qty += s.quantity;
-    itemStats[s.item.name].total += s.total;
+    itemStats[s.item.name].total += Number(s.total);
   });
   Object.entries(itemStats).forEach(([name, stats]) => {
     content += `"${name}",${stats.qty},${stats.total.toFixed(2)}\n`;
@@ -38,7 +38,7 @@ export async function getExportCSV(from: Date, to: Date) {
     labels.forEach((l: string) => {
       if (!summaryLabelStats[l]) summaryLabelStats[l] = { qty: 0, total: 0 };
       summaryLabelStats[l].qty += s.quantity;
-      summaryLabelStats[l].total += s.total;
+      summaryLabelStats[l].total += Number(s.total);
     });
   });
   Object.entries(summaryLabelStats).forEach(([label, stats]) => {

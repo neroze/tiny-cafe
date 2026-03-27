@@ -9,8 +9,8 @@ export const items = pgTable("items", {
   category: text("category").notNull(), // Snacks, Drinks, Main
   unit: text("unit").default("pcs"),
   isIngredient: boolean("is_ingredient").default(false),
-  costPrice: integer("cost_price").notNull(), // in cents/paisa
-  sellingPrice: integer("selling_price").notNull(), // in cents/paisa
+  costPrice: decimal("cost_price", { precision: 12, scale: 2 }).notNull(),
+  sellingPrice: decimal("selling_price", { precision: 12, scale: 2 }).notNull(),
   minStock: integer("min_stock").default(0),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
@@ -28,11 +28,11 @@ export const orders = pgTable("orders", {
   id: serial("id").primaryKey(),
   tableId: integer("table_id").references(() => tables.id).notNull(),
   status: text("status").default("OPEN"), // OPEN, CLOSED, CANCELLED
-  total: integer("total").default(0),
+  total: decimal("total", { precision: 12, scale: 2 }).default("0"),
   paymentType: text("payment_type").default("CASH"), // CASH, CARD, CREDIT
   paymentStatus: text("payment_status").default("PAID"), // PAID, PARTIAL, PENDING
-  cashAmount: integer("cash_amount").default(0),
-  creditAmount: integer("credit_amount").default(0),
+  cashAmount: decimal("cash_amount", { precision: 12, scale: 2 }).default("0"),
+  creditAmount: decimal("credit_amount", { precision: 12, scale: 2 }).default("0"),
   createdAt: timestamp("created_at").defaultNow(),
   closedAt: timestamp("closed_at"),
 });
@@ -43,13 +43,13 @@ export const sales = pgTable("sales", {
   date: timestamp("date").defaultNow().notNull(),
   itemId: integer("item_id").references(() => items.id).notNull(),
   quantity: integer("quantity").notNull(),
-  unitPrice: integer("unit_price").notNull(), // Snapshot of price at sale time
-  total: integer("total").notNull(),
+  unitPrice: decimal("unit_price", { precision: 12, scale: 2 }).notNull(), // Snapshot of price at sale time
+  total: decimal("total", { precision: 12, scale: 2 }).notNull(),
   cogs: decimal("cogs", { precision: 12, scale: 2 }).default("0"),
   isFoc: boolean("is_foc").default(false),
   focReason: text("foc_reason").default(""),
   focNote: text("foc_note").default(""),
-  theoreticalValue: integer("theoretical_value").default(0),
+  theoreticalValue: decimal("theoretical_value", { precision: 12, scale: 2 }).default("0"),
   labels: text("labels").array().default(sql`ARRAY[]::text[]`),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -71,7 +71,7 @@ export const expenses = pgTable("expenses", {
   date: timestamp("date").defaultNow().notNull(),
   category: text("category").notNull(), // Rent, Salary, Utilities, Supplies, Maintenance, Misc
   description: text("description").default(""),
-  amount: integer("amount").notNull(), // in cents/paisa
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   isRecurring: boolean("is_recurring").default(false),
   frequency: text("frequency").default("daily"), // daily | monthly | yearly
   createdAt: timestamp("created_at").defaultNow(),
@@ -146,8 +146,8 @@ export const receivables = pgTable("receivables", {
   id: serial("id").primaryKey(),
   orderId: integer("order_id").references(() => orders.id).notNull(),
   customerId: integer("customer_id").references(() => customers.id).notNull(),
-  amount: integer("amount").notNull(),
-  outstanding: integer("outstanding").notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  outstanding: decimal("outstanding", { precision: 12, scale: 2 }).notNull(),
   status: text("status").default("OPEN"), // OPEN, CLOSED
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -156,7 +156,7 @@ export const receivables = pgTable("receivables", {
 export const payments = pgTable("payments", {
   id: serial("id").primaryKey(),
   receivableId: integer("receivable_id").references(() => receivables.id).notNull(),
-  amount: integer("amount").notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   method: text("method").notNull(), // CASH | CARD
   date: timestamp("date").defaultNow().notNull(),
 });
@@ -171,23 +171,39 @@ export const settings = pgTable("settings", {
 export const insertSettingsSchema = createInsertSchema(settings).omit({ id: true, updatedAt: true });
 export type Setting = typeof settings.$inferSelect;
 export type InsertSetting = z.infer<typeof insertSettingsSchema>;
-export const insertItemSchema = createInsertSchema(items).omit({ id: true, createdAt: true });
+export const insertItemSchema = createInsertSchema(items, {
+  costPrice: z.coerce.number(),
+  sellingPrice: z.coerce.number(),
+}).omit({ id: true, createdAt: true });
 export const insertSaleSchema = createInsertSchema(sales, {
   date: z.coerce.date(),
+  unitPrice: z.coerce.number(),
+  total: z.coerce.number(),
+  theoreticalValue: z.coerce.number(),
 }).omit({ id: true, createdAt: true });
 export const insertStockSchema = createInsertSchema(stock, {
   date: z.coerce.date(),
 }).omit({ id: true, createdAt: true });
 export const insertExpenseSchema = createInsertSchema(expenses, {
   date: z.coerce.date(),
+  amount: z.coerce.number(),
 }).omit({ id: true, createdAt: true });
 export const insertRecipeSchema = createInsertSchema(recipes).omit({ id: true, createdAt: true });
 export const insertRecipeItemSchema = createInsertSchema(recipeItems).omit({ id: true });
 export const insertTableSchema = createInsertSchema(tables).omit({ id: true, createdAt: true });
-export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true, closedAt: true });
+export const insertOrderSchema = createInsertSchema(orders, {
+  total: z.coerce.number(),
+  cashAmount: z.coerce.number(),
+  creditAmount: z.coerce.number(),
+}).omit({ id: true, createdAt: true, closedAt: true });
 export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, createdAt: true });
-export const insertReceivableSchema = createInsertSchema(receivables).omit({ id: true, createdAt: true, updatedAt: true });
-export const insertPaymentSchema = createInsertSchema(payments).omit({ id: true });
+export const insertReceivableSchema = createInsertSchema(receivables, {
+  amount: z.coerce.number(),
+  outstanding: z.coerce.number(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertPaymentSchema = createInsertSchema(payments, {
+  amount: z.coerce.number(),
+}).omit({ id: true });
 
 // Types
 export type Item = typeof items.$inferSelect;
