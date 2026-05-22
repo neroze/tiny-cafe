@@ -136,3 +136,29 @@ export function useCloseOrder() {
         }
     });
 }
+
+export function useMoveOrder() {
+    const queryClient = useQueryClient();
+    return useMutation({
+        mutationFn: async ({ orderId, newTableId }: { orderId: number; newTableId: number }) => {
+            const url = buildUrl(api.orders.move.path, { id: orderId });
+            const payload = api.orders.move.input.parse({ newTableId });
+            const res = await fetch(url, {
+                method: api.orders.move.method,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+                credentials: "include",
+            });
+            if (!res.ok) {
+                const error = await res.json();
+                throw new Error(error.message || "Failed to move order");
+            }
+            return api.orders.move.responses[200].parse(await res.json());
+        },
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: [api.orders.get.path, variables.orderId] });
+            queryClient.invalidateQueries({ queryKey: [api.orders.list.path] });
+            queryClient.invalidateQueries({ queryKey: [api.tables.list.path] });
+        }
+    });
+}

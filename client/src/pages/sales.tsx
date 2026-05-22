@@ -3,7 +3,7 @@ import { useState, useMemo } from "react";
 import { Layout } from "@/components/layout";
 import { PageHeader, Button, Card, Input } from "@/components/ui-components";
 import { useTables } from "@/hooks/use-tables";
-import { useOrders, useCreateOrder, useAddItemToOrder, useRemoveItemFromOrder, useCloseOrder } from "@/hooks/use-orders";
+import { useOrders, useCreateOrder, useAddItemToOrder, useRemoveItemFromOrder, useCloseOrder, useMoveOrder } from "@/hooks/use-orders";
 import { useCustomers, useCreateCustomer } from "@/hooks/use-customers";
 import { useItems } from "@/hooks/use-items";
 import { useReceivables, useRecordReceivablePayment } from "@/hooks/use-receivables";
@@ -123,8 +123,10 @@ function TableCard({ table, onClick }: { table: any, onClick: () => void }) {
 function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
   const { toast } = useToast();
   const { data: openOrders = [], isLoading: isLoadingOrders } = useOrders("OPEN");
+  const { data: tables = [] } = useTables();
   const createOrder = useCreateOrder();
   const closeOrder = useCloseOrder();
+  const moveOrder = useMoveOrder();
   const { data: customers = [] } = useCustomers();
   const createCustomer = useCreateCustomer();
   const updateSale = useUpdateSale();
@@ -143,6 +145,8 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
   const [focReason, setFocReason] = useState<string>("");
   const [focNote, setFocNote] = useState<string>("");
   const [discount, setDiscount] = useState<number>(0);
+  const [showMoveDialog, setShowMoveDialog] = useState(false);
+  const [selectedNewTableId, setSelectedNewTableId] = useState<number | null>(null);
 
   const orderItems = activeOrder?.items || [];
   const orderTotal = activeOrder?.total || 0;
@@ -182,6 +186,22 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
       });
 
       toast({ title: "Order Closed", description: `Table ${table.number} is now free.` });
+      onBack();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Error", description: err.message });
+    }
+  };
+
+  const handleMoveOrder = async () => {
+    if (!orderId || !selectedNewTableId) return;
+    try {
+      await moveOrder.mutateAsync({
+        orderId,
+        newTableId: selectedNewTableId
+      });
+      toast({ title: "Order Moved", description: `Order moved to new table.` });
+      setShowMoveDialog(false);
+      setSelectedNewTableId(null);
       onBack();
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error", description: err.message });
@@ -253,6 +273,14 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                 </div>
               )}
             </div>
+            <Button 
+              variant="outline"
+              onClick={() => setShowMoveDialog(true)}
+              isLoading={moveOrder.isPending}
+            >
+              <Edit2 className="w-5 h-5 mr-2" />
+              Move Table
+            </Button>
             <Button 
               onClick={() => setShowSummary(true)}
               isLoading={closeOrder.isPending}
@@ -501,6 +529,52 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
               #print-area, #print-area * { visibility: visible; }
               #print-area { position: absolute; left: 0; top: 0; width: 80mm; color: #000; }
             }`}</style>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={showMoveDialog} onOpenChange={(o) => setShowMoveDialog(o)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Move Order to New Table</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                Select an empty table to move this order to.
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {tables.filter((t: any) => t.id !== table.id && t.status !== 'occupied').map((t: any) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setSelectedNewTableId(t.id)}
+                    className={cn(
+                      "p-4 rounded-lg border-2 transition-all duration-200",
+                      selectedNewTableId === t.id
+                        ? "border-primary bg-primary/10"
+                        : "border-border hover:border-primary/50"
+                    )}
+                  >
+                    <div className="font-bold">Table {t.number}</div>
+                    <div className="text-xs text-muted-foreground">Capacity: {t.capacity}</div>
+                  </button>
+                ))}
+                {tables.filter((t: any) => t.id !== table.id && t.status !== 'occupied').length === 0 && (
+                  <div className="col-span-full py-8 text-center text-muted-foreground">
+                    No empty tables available
+                  </div>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowMoveDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleMoveOrder}
+                disabled={!selectedNewTableId || moveOrder.isPending}
+                isLoading={moveOrder.isPending}
+              >
+                Move Order
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}

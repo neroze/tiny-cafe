@@ -57,7 +57,7 @@ export const handler: Handler = async (event) => {
     const path = normalizePath(event.path);
 
     const extractOrderId = (p: string) => {
-      const m = p.match(/\/orders\/(\d+)(?:\/(items|close))?/);
+      const m = p.match(/\/orders\/(\d+)(?:\/(items|close|move))?/);
       return m && m[1] ? Number(m[1]) : NaN;
     };
 
@@ -438,6 +438,19 @@ export const handler: Handler = async (event) => {
       } catch (err: any) {
         if (err instanceof z.ZodError) return json(400, { message: err.message });
         return json(400, { message: err.message || "Failed to close order" });
+      }
+    }
+
+    if (method === "POST" && path.startsWith("/api/orders/") && path.endsWith("/move")) {
+      try {
+        const orderId = extractOrderId(path);
+        if (!orderId || Number.isNaN(orderId)) return json(400, { message: "Invalid order id" });
+        const input = api.orders.move.input.parse(body);
+        const order = await storage.moveOrder(orderId, input.newTableId);
+        return json(200, order);
+      } catch (err: any) {
+        if (err instanceof z.ZodError) return json(400, { message: err.message });
+        return json(400, { message: err.message || "Failed to move order" });
       }
     }
 

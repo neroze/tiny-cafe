@@ -1044,6 +1044,33 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async moveOrder(id: number, newTableId: number): Promise<Order> {
+    const order = await this.getOrder(id);
+    if (!order) throw new Error("Order not found");
+    if (order.status !== 'OPEN') throw new Error("Cannot move closed order");
+
+    const existingOrder = await db.select().from(orders)
+      .where(and(eq(orders.tableId, newTableId), eq(orders.status, 'OPEN')));
+
+    if (existingOrder.length > 0) {
+      throw new Error(`Table ${newTableId} already has an open order`);
+    }
+
+    const oldTableId = order.tableId;
+
+    const [updated] = await db.update(orders)
+      .set({ tableId: newTableId })
+      .where(eq(orders.id, id))
+      .returning();
+
+    if (oldTableId) {
+      await db.update(tables).set({ status: 'empty' }).where(eq(tables.id, oldTableId));
+    }
+    await db.update(tables).set({ status: 'occupied' }).where(eq(tables.id, newTableId));
+
+    return updated;
+  }
+
   async addItemToOrder(orderId: number, item: InsertSale): Promise<Sale> {
      const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
      if (!order || order.status !== 'OPEN') {

@@ -400,6 +400,17 @@ export const api = {
             200: z.custom<typeof orders.$inferSelect>(),
             400: errorSchemas.validation,
         }
+    },
+    move: {
+        method: 'POST' as const,
+        path: '/api/orders/:id/move',
+        input: z.object({
+            newTableId: z.number(),
+        }),
+        responses: {
+            200: z.custom<typeof orders.$inferSelect>(),
+            400: errorSchemas.validation,
+        }
     }
   },
   customers: {

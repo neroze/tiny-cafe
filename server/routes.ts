@@ -362,6 +362,16 @@ export async function registerRoutes(
       }
   });
 
+  app.post(api.orders.move.path, async (req, res) => {
+      try {
+          const input = api.orders.move.input.parse(req.body);
+          const order = await storage.moveOrder(Number(req.params.id), input.newTableId);
+          res.json(order);
+      } catch (err: any) {
+          res.status(400).json({ message: err.message });
+      }
+  });
+
   // Reports
   app.get(api.reports.revenue_by_item.path, async (req, res) => {
     try {
