@@ -333,6 +333,7 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
       )}
 
       {activeOrder && (
+        <>
         <Dialog open={showSummary} onOpenChange={(o) => setShowSummary(o)}>
           <DialogContent className="max-w-2xl p-0">
             <div className="p-6 space-y-4">
@@ -476,7 +477,7 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
                         <div>
                           <label className="text-sm">Paid Now (Cash)</label>
                           <Input type="number" value={cashReceived} onChange={(e) => setCashReceived(Number(e.target.value))} min={0} />
-                          <div className="text-xs text-muted-foreground mt-1">{`Remaining Balance: NPR ${Math.max(0, Math.max(0, Number(activeOrder.total) - Number(discount || 0)) - Number(cashReceived)).toLocaleString()}`}</div>
+                          <div className="text-xs text-muted-foreground mt-1">{`Remaining Balance: NPR ${Math.max(0, Math.max(0, Number(activeOrder.total) - Number(discount || 0)) - Number(cashReceived || 0)).toLocaleString()}`}</div>
                         </div>
                         <div>
                           <div className="text-sm">Pay Later (Credit)</div>
@@ -577,6 +578,7 @@ function OrderView({ table, onBack }: { table: any, onBack: () => void }) {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </>
       )}
     </div>
   );
